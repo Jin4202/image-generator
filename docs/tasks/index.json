@@ -1,0 +1,236 @@
+[
+  {
+    "id": "T01",
+    "title": "SQLite repository와 CAS/lease 구현",
+    "dependencies": [],
+    "files": [
+      "src/infrastructure/persistence/repository.ts"
+    ],
+    "testFile": "tests/acceptance/T01.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T01.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T02",
+    "title": "이미지 파일 저장과 업로드 경계",
+    "dependencies": [
+      "T01"
+    ],
+    "files": [
+      "src/infrastructure/storage/local.ts",
+      "src/infrastructure/images/sharp.ts",
+      "src/application/services/media.ts",
+      "src/app/api/media/upload/route.ts",
+      "src/app/api/media/[id]/route.ts"
+    ],
+    "testFile": "tests/acceptance/T02.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T02.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T03",
+    "title": "프로젝트와 승인 라이브러리 service",
+    "dependencies": [
+      "T01",
+      "T02"
+    ],
+    "files": [
+      "src/application/services/projects.ts",
+      "src/application/services/library.ts",
+      "src/app/api/projects/route.ts",
+      "src/app/api/projects/[id]/route.ts",
+      "src/app/api/projects/[id]/workspace/route.ts",
+      "src/app/api/styles/route.ts",
+      "src/app/api/styles/[id]/approve/route.ts",
+      "src/app/api/assets/route.ts",
+      "src/app/api/assets/[id]/approve/route.ts"
+    ],
+    "testFile": "tests/acceptance/T03.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T03.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T04",
+    "title": "장면 저장과 canvas 계약",
+    "dependencies": [
+      "T03"
+    ],
+    "files": [
+      "src/application/services/scenes.ts",
+      "src/components/canvas/scene-canvas.tsx",
+      "src/app/api/scenes/route.ts",
+      "src/app/api/scenes/[id]/route.ts",
+      "src/app/api/scenes/[id]/duplicate/route.ts"
+    ],
+    "testFile": "tests/acceptance/T04.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T04.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T05",
+    "title": "순수 compiler와 immutable preview",
+    "dependencies": [
+      "T04"
+    ],
+    "files": [
+      "src/application/compiler.ts",
+      "src/application/services/previews.ts",
+      "src/app/api/generations/preview/route.ts"
+    ],
+    "testFile": "tests/acceptance/T05.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T05.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T06",
+    "title": "영속 생성 orchestration과 worker loop",
+    "dependencies": [
+      "T02",
+      "T05"
+    ],
+    "files": [
+      "src/application/services/runs.ts",
+      "src/worker/runner.ts",
+      "src/app/api/generations/route.ts",
+      "src/app/api/generations/[id]/route.ts",
+      "src/app/api/generations/[id]/resolve/route.ts",
+      "src/app/api/generations/[id]/retry-download/route.ts"
+    ],
+    "testFile": "tests/acceptance/T06.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T06.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T07",
+    "title": "fal boundary와 native payload adapter",
+    "dependencies": [
+      "T05"
+    ],
+    "files": [
+      "src/infrastructure/models/fal.ts",
+      "src/app/api/models/route.ts",
+      "docs/model-support-matrix.md"
+    ],
+    "testFile": "tests/acceptance/T07.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T07.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T08",
+    "title": "사람 평가와 child revision",
+    "dependencies": [
+      "T05",
+      "T06"
+    ],
+    "files": [
+      "src/application/services/review.ts",
+      "src/app/api/candidates/[id]/route.ts",
+      "src/app/api/candidates/[id]/review/route.ts",
+      "src/app/api/candidates/[id]/refine/route.ts"
+    ],
+    "testFile": "tests/acceptance/T08.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T08.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T09",
+    "title": "효과와 PNG/manifest export",
+    "dependencies": [
+      "T02",
+      "T08"
+    ],
+    "files": [
+      "src/application/services/effects.ts",
+      "src/infrastructure/images/compositor.ts",
+      "src/components/canvas/effects-canvas.tsx",
+      "src/app/api/candidates/[id]/effects/route.ts",
+      "src/app/api/exports/route.ts",
+      "src/app/api/exports/[id]/manifest/route.ts"
+    ],
+    "testFile": "tests/acceptance/T09.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T09.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T10",
+    "title": "제품 UI와 API client 통합",
+    "dependencies": [
+      "T03",
+      "T04",
+      "T05",
+      "T06",
+      "T08",
+      "T09"
+    ],
+    "files": [
+      "src/app/scenes/page.tsx",
+      "src/app/projects/page.tsx",
+      "src/app/styles/page.tsx",
+      "src/app/review/page.tsx",
+      "src/app/history/page.tsx",
+      "src/app/generate/page.tsx",
+      "src/app/effects/page.tsx",
+      "src/app/assets/page.tsx",
+      "src/app/_studio/api.ts",
+      "src/app/_studio/ui.tsx",
+      "src/app/_studio/generation.tsx",
+      "src/app/_studio/media.tsx"
+    ],
+    "testFile": "tests/e2e-acceptance/T10.spec.ts",
+    "command": "npm run test:e2e:acceptance -- T10.spec.ts",
+    "status": "done"
+  },
+  {
+    "id": "T11",
+    "title": "실험 계획과 비교 보고",
+    "dependencies": [
+      "T03",
+      "T06",
+      "T07",
+      "T08"
+    ],
+    "files": [
+      "src/application/services/experiments.ts",
+      "src/app/experiments/page.tsx",
+      "src/app/api/experiments/route.ts",
+      "src/app/api/experiments/[id]/route.ts",
+      "src/app/api/experiments/[id]/runs/route.ts"
+    ],
+    "testFile": "tests/acceptance/T11.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T11.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T12",
+    "title": "composition root 연결과 전체 handoff 검증",
+    "dependencies": [
+      "T01",
+      "T02",
+      "T03",
+      "T04",
+      "T05",
+      "T06",
+      "T07",
+      "T08",
+      "T09",
+      "T10",
+      "T11"
+    ],
+    "files": [
+      "src/server/container.ts",
+      "src/server/create-dependencies.ts",
+      "src/worker/main.ts",
+      "src/app/api/health/route.ts",
+      "tests/integration/demo.test.ts",
+      "tests/e2e/demo.spec.ts",
+      "src/app/page.tsx",
+      "tests/e2e/setup.spec.ts",
+      "playwright.config.ts",
+      "scripts/e2e-stack.ts",
+      "README.md"
+    ],
+    "testFile": "tests/acceptance/T12.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T12.test.ts",
+    "status": "done"
+  }
+]

@@ -1,0 +1,7 @@
+import { Compiled, CreateScene, Project, Snapshot } from "../../src/contracts";
+export const ids = { project: "00000000-0000-4000-8000-000000000001", scene: "00000000-0000-4000-8000-000000000002", media: "00000000-0000-4000-8000-000000000003", candidate: "00000000-0000-4000-8000-000000000004", preview: "00000000-0000-4000-8000-000000000005", run: "00000000-0000-4000-8000-000000000006" };
+export const now = "2026-10-26T00:00:00.000Z";
+export const project = Project.parse({ id: ids.project, projectId: ids.project, revision: 0, createdAt: now, title: "Wind Duel", budgetMicros: null });
+export const sceneInput = CreateScene.parse({ projectId: ids.project, content: { prompt: "Wind swordsman", camera: "low angle", size: { width: 1280, height: 720 }, references: [], styleVersionId: null, assetVersionIds: [], boxes: [] } });
+export const snapshot = Snapshot.parse({ sceneId: ids.scene, sceneRevision: 0, scene: sceneInput.content, style: null, assets: [], parentCandidateId: null, edit: null });
+export const compiled = Compiled.parse({ adapterId: "mock-reference", endpoint: "mock://fixture", prompt: "Wind swordsman", references: [], parameters: { image_size: { width: 1280, height: 720 }, num_images: 1, seed: 1, guidance_scale: 2.5, num_inference_steps: 28, acceleration: "regular", enable_prompt_expansion: false, enable_safety_checker: true, output_format: "png", sync_mode: false }, warnings: [], estimate: { kind: "known", micros: 0, currency: "USD", source: "mock", verifiedAt: now } });

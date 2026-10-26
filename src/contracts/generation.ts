@@ -1,0 +1,26 @@
+import { z } from "zod";
+import { Id, Money, RecordMeta, Size, Timestamp } from "./common";
+import { Asset, Reference, SceneContent, Style } from "./studio";
+export const AdapterId = z.enum(["mock-reference", "fal-flux2-edit", "fal-flux2-text"]);
+export const RunStatus = z.enum(["draft", "submitting", "queued", "running", "downloading", "download_failed", "succeeded", "failed", "submission_unknown"]);
+export type RunStatus = z.infer<typeof RunStatus>;
+export const PreviewInput = z.object({ sceneId: Id, adapterId: AdapterId, outputCount: z.number().int().min(1).max(4).default(1), seed: z.number().int().min(0).max(2147483647).nullable().default(null), parentCandidateId: Id.nullable().default(null), edit: z.object({ instruction: z.string().trim().min(1).max(2000), preservation: z.string().max(2000), maskMediaId: Id.nullable() }).strict().nullable().default(null) }).strict().refine(v => Boolean(v.parentCandidateId) === Boolean(v.edit), "Parent and edit must be supplied together");
+export const Snapshot = z.object({ sceneId: Id, sceneRevision: z.number().int().nonnegative(), scene: SceneContent, style: Style.nullable(), assets: z.array(Asset), parentCandidateId: Id.nullable(), edit: z.object({ instruction: z.string(), preservation: z.string(), maskMediaId: Id.nullable() }).nullable() });
+export const Compiled = z.object({ adapterId: AdapterId, endpoint: z.string(), prompt: z.string(), references: z.array(Reference), parameters: z.object({ image_size: Size, num_images: z.number().int().min(1).max(4), seed: z.number().int().nullable(), guidance_scale: z.literal(2.5), num_inference_steps: z.literal(28), acceleration: z.literal("regular"), enable_prompt_expansion: z.literal(false), enable_safety_checker: z.literal(true), output_format: z.literal("png"), sync_mode: z.literal(false) }).strict(), warnings: z.array(z.enum(["SOFT_LAYOUT", "FULL_IMAGE_EDIT", "REFERENCES_OMITTED", "NEGATIVE_AS_TEXT"])), estimate: Money });
+export const Preview = z.object({ ...RecordMeta, snapshot: Snapshot, compiled: Compiled, hash: z.string().regex(/^[a-f0-9]{64}$/), expiresAt: Timestamp });
+export const SubmitInput = z.object({ previewId: Id, previewHash: z.string().regex(/^[a-f0-9]{64}$/), idempotencyKey: Id, acceptUnknownCost: z.boolean(), maxEstimatedCostMicros: z.number().int().nonnegative().safe().nullable() }).strict();
+export const Run = z.object({ ...RecordMeta, previewId: Id, idempotencyKey: Id, status: RunStatus, snapshot: Snapshot, compiled: Compiled, providerRequestId: z.string().nullable(), actualCost: Money, errorCode: z.string().nullable(), updatedAt: Timestamp });
+export const Candidate = z.object({ ...RecordMeta, runId: Id, index: z.number().int().nonnegative(), mediaId: Id, parentCandidateId: Id.nullable(), seed: z.number().int().nullable() });
+export const ResolveInput = z.discriminatedUnion("action", [z.object({ action: z.literal("attach"), providerRequestId: z.string().min(1).max(500) }).strict(), z.object({ action: z.literal("abandon"), reason: z.string().trim().min(1).max(1000) }).strict()]);
+export const ExperimentInput = z.object({ projectId: Id, sceneIds: z.array(Id).length(3), repeats: z.literal(3) }).strict().refine(v => new Set(v.sceneIds).size === 3, "Three distinct scenes required");
+export const Experiment = z.object({ ...RecordMeta, sceneIds: z.array(Id), sceneRevisions: z.record(Id, z.number().int().nonnegative()), runIds: z.array(Id) });
+export type Compiled = z.infer<typeof Compiled>;
+export type Snapshot = z.infer<typeof Snapshot>;
+export type Preview = z.infer<typeof Preview>;
+export type Run = z.infer<typeof Run>;
+export type Candidate = z.infer<typeof Candidate>;
+export type Experiment = z.infer<typeof Experiment>;
+export type PreviewInput = z.infer<typeof PreviewInput>;
+
+export const ModelInfo = z.object({ id: AdapterId, provider: z.enum(["mock", "fal"]), endpoint: z.string(), available: z.boolean(), mode: z.enum(["mock", "live"]), scope: z.enum(["demo-only", "product"]), maxReferences: z.number().int().min(0).max(4), masks: z.literal(false), reason: z.string().nullable() }).strict();
+export type ModelInfo = z.infer<typeof ModelInfo>;
