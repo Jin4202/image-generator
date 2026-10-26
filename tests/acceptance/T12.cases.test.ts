@@ -126,7 +126,7 @@ describe("restart recovery across processes", () => {
     const unknown = await waitFor(async () => { const view = await data<{ run: C.Run }>(r.generation.GET(new Request(base), ctx(run.id))); return view.run.status === "submission_unknown" ? view.run : undefined; });
     expect(unknown).toMatchObject({ providerRequestId: null, errorCode: "SUBMISSION_INTERRUPTED" });
     expect(await first.stop()).toBe(0);
-    const { requestId } = await new MockAdapter().submit(preview.compiled, []);
+    const { requestId } = await new MockAdapter().submit(preview.compiled, [], { signal: new AbortController().signal, mayPost: () => true });
     await data(r.resolve.POST(json({ action: "attach", providerRequestId: requestId }), ctx(run.id)));
     startWorker();
     const done = await waitFor(async () => { const view = await data<{ run: C.Run; candidates: C.Candidate[] }>(r.generation.GET(new Request(base), ctx(run.id))); return view.run.status === "succeeded" ? view : undefined; });

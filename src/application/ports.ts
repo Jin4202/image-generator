@@ -9,6 +9,12 @@ export interface UnitOfWork {
   replace<K extends EntityKind>(kind: K, value: Entities[K], expectedRevision: number): void;
   acquireLease(owner: string, now: string, until: string): boolean;
   releaseLease(owner: string): void;
+  /**
+   * T17: removes the project and every record scoped to it, children before parents (FK-safe), in one atomic step
+   * (joins the surrounding transaction). The only exception to append-only storage; blobs are never touched.
+   * Existence, CAS and active-run checks are the caller's, in the same transaction. Missing project → NOT_FOUND.
+   */
+  deleteProject(projectId: string): void;
 }
 export interface Repository extends UnitOfWork {
   transaction<T>(work: (tx: UnitOfWork) => T): T;
@@ -38,9 +44,19 @@ export interface ImageCompositor {
 }
 export type ProviderOutput = { bytes: Uint8Array; mime: "image/png"; seed: number | null };
 export type ProviderStatus = { status: "queued" | "running" } | { status: "failed"; code: string } | { status: "completed" };
+/**
+ * T13: one submit attempt. `signal` aborts at the attempt deadline, on lease loss or when the attempt ends; after it aborts
+ * no new upload or paid request may start. `mayPost()` is the synchronous last authorization (current lease owner, run still
+ * `submitting` at the attempt's revision): call it immediately before starting the paid request, with no await in between.
+ * Aborting a request that already left does not cancel or refund it at the provider.
+ */
+export interface SubmitContext {
+  readonly signal: AbortSignal;
+  mayPost(): boolean;
+}
 export interface ModelAdapter {
   readonly id: Compiled["adapterId"];
-  submit(input: Compiled, references: readonly Uint8Array[]): Promise<{ requestId: string }>;
+  submit(input: Compiled, references: readonly Uint8Array[], context: SubmitContext): Promise<{ requestId: string }>;
   poll(requestId: string): Promise<ProviderStatus>;
   download(requestId: string): Promise<ProviderOutput[]>;
 }

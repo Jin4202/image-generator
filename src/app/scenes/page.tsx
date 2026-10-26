@@ -95,8 +95,8 @@ function SceneEditor({ ws, scene, onSaved }: { ws: C.Workspace; scene: C.Scene |
             {approvedStyles.map(s => <option key={s.id} value={s.id}>v{s.version} · {s.specification.positive.slice(0, 30)}</option>)}
           </select>
         </label>
-        <fieldset className="text-sm"><legend>자산 (승인 버전만)</legend>
-          {approvedAssets.length === 0 ? <p className="text-slate-400">승인된 자산이 없습니다.</p> : approvedAssets.map(a => (
+        <fieldset className="text-sm"><legend>에셋 (승인 버전만)</legend>
+          {approvedAssets.length === 0 ? <p className="text-slate-400">승인된 에셋이 없습니다.</p> : approvedAssets.map(a => (
             <label key={a.id} className="mr-3 inline-flex items-center gap-1">
               <input type="checkbox" checked={draft.assetVersionIds.includes(a.id)} onChange={e => set({ assetVersionIds: e.target.checked ? [...draft.assetVersionIds, a.id] : draft.assetVersionIds.filter(id => id !== a.id) })} />{a.name} v{a.version}
             </label>
@@ -105,7 +105,7 @@ function SceneEditor({ ws, scene, onSaved }: { ws: C.Workspace; scene: C.Scene |
       </Panel>
 
       <Panel title="참조 이미지">
-        <p className="text-xs text-slate-400">실제로 보낼 이미지만 직접 고릅니다. 선택한 스타일·자산의 이미지가 자동으로 추가되지 않습니다. 전송 순서는 캐릭터 → 스타일 → 스케치이며, 모델별 개수 한도를 넘으면 미리보기에서 차단됩니다.</p>
+        <p className="text-xs text-slate-400">실제로 보낼 이미지만 직접 고릅니다. 선택한 스타일·에셋의 이미지가 자동으로 추가되지 않습니다. 전송 순서는 캐릭터 → 스타일 → 스케치이며, 모델별 개수 한도를 넘으면 미리보기에서 차단됩니다.</p>
         {refs.map((r, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
             {r.mediaId && <Thumb mediaId={r.mediaId} alt={`참조 ${i + 1}`} size="h-12 w-12" />}

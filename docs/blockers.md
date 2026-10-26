@@ -58,3 +58,16 @@
 - 추천: A.
 - 사용자/설계 담당자 결정 (2026-10-26): A 채택. `ImageCompositor` 포트와 `Dependencies.imageCompositor`를 추가하고 sharp 구현은 `src/infrastructure/images/compositor.ts`(T09 소유)에 둔다. contracts#effects, architecture, T09/T12 문서, index.json, test 기본 의존성을 갱신. 상태: resolved.
 - 독립 진행 가능: effects 저장/CAS/scope, manifest 생성·검증, manifest 다운로드 route, EffectsCanvas.
+
+## T16 — 설정 변경과 신규 submit의 경쟁 제어 (2026-10-26)
+
+- Task ID: T16 (T16.md 6단계: "경쟁 방지 방식을 계약 단계에서 확정한다(단순 UI 검사 불충분)")
+- 충돌/누락: active run 확인 → settings.json 쓰기 사이에 다른 요청이 draft run을 만들 수 있다. 파일 I/O는 DB transaction 안에서 할 수 없다. 또 저장 후 재시작 전까지 서버는 이전 설정으로 계속 동작하므로, 그 사이 만든 run은 재시작 뒤 다른 설정(모드/키)으로 처리될 수 있다.
+- 근거: run 생성(submitRun)은 Next 서버 프로세스에서만 일어나고 worker는 run을 만들지 않는다. submitRun은 동기 transaction 안에서 `deps.adapters.has(...)`를 확인한다.
+- 선택지:
+  - A (추천): 서버 프로세스 내 게이트. 설정 변경 요청은 ① 이 프로세스의 adapter map에서 mock 외 provider 사용을 즉시 닫고(모든 submit이 같은 Map을 공유하므로 이후 transaction은 UNSUPPORTED) ② 동기 transaction에서 active run(unknown/download_failed 포함) 확인 → 있으면 게이트를 되돌리고 CONFLICT ③ 없으면 settings.json atomic replace, 실패하면 게이트를 되돌리고 기존 파일 유지 ④ 성공하면 재시작 전까지 `restartRequired=true`, 게이트 유지(신규 생성은 mock 포함 전부 거부), models는 available=false(reason `RESTART_REQUIRED`). worker는 매 tick 전에 설정 파일 signature를 다시 읽어 시작 시점과 다르면 새 tick을 멈추고 lease 해제 후 "재시작 필요"로 종료한다(hot reload 아님). 새 migration/DB 키 저장 없음.
+  - B: 새 migration으로 DB에 settings revision 행을 두고 submitRun transaction이 그 revision을 검사. 서버 간에도 직렬화되지만 runs 계약/테이블 변경이 커지고 T16 소유 범위를 넘는다.
+  - C: UI에서만 active run 확인. 문서가 명시적으로 불충분하다고 함.
+- 추천: A.
+- 사용자/설계 담당자 결정 (2026-10-26): A 채택(서버 프로세스 내 게이트 + transaction active 검사 + atomic replace, 실패 시 롤백, 저장 후 재시작 전 신규 생성 거부, worker는 설정 변경 감지 시 정상 종료). 상태: resolved.
+- 독립적으로 계속 가능한 작업: settings DTO·파일 저장/권한·우선순위 해석, GET 응답, /settings 화면.

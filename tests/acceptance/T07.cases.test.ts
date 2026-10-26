@@ -16,6 +16,7 @@ afterAll(() => { vi.unstubAllGlobals(); expect(realNetworkCalls).toBe(0); });
 
 const KEY = "fal-test-secret-key";
 const png = () => new Uint8Array(Buffer.from(MOCK_PNG_BASE64, "base64"));
+const open = { signal: new AbortController().signal, mayPost: () => true };
 const edit: Compiled = { ...structuredClone(compiled), adapterId: "fal-flux2-edit", endpoint: "fal-ai/flux-2/edit", prompt: "P", references: [{ mediaId: ids.media, role: "character", note: "" }, { mediaId: ids.candidate, role: "sketch", note: "" }], estimate: { kind: "unknown", reason: "pricing-not-configured" } };
 const text: Compiled = { ...structuredClone(compiled), adapterId: "fal-flux2-text", endpoint: "fal-ai/flux-2", prompt: "P", estimate: { kind: "unknown", reason: "pricing-not-configured" } };
 const err = async (work: Promise<unknown>) => { try { await work; return "no error"; } catch (e) { return e instanceof SubmissionError ? `submission:${e.certainty}` : (e as { code?: string; message?: string }).code === "PROVIDER" ? `provider:${(e as Error).message}` : (e as { code?: string }).code ?? String(e); } };
@@ -62,7 +63,7 @@ describe("createFalAdapter with an injected transport", () => {
   it("uploads each reference in order, binds URLs and submits exactly once without leaking the key", async () => {
     const { transport, calls, count } = fakeTransport();
     const input = structuredClone(edit); const before = structuredClone(input);
-    expect(await createFalAdapter("fal-flux2-edit", KEY, transport).submit(input, [png(), new Uint8Array([1, 2, 3])])).toEqual({ requestId: "req-1" });
+    expect(await createFalAdapter("fal-flux2-edit", KEY, transport).submit(input, [png(), new Uint8Array([1, 2, 3])], open)).toEqual({ requestId: "req-1" });
     expect(calls.map(c => c.op)).toEqual(["upload", "upload", "submit"]);
     expect(calls[2].args[0]).toBe("fal-ai/flux-2/edit");
     expect((calls[2].args[1] as FalInput).image_urls).toEqual(["https://storage.example.com/ref-1.png", "https://storage.example.com/ref-2.png"]);
@@ -79,12 +80,12 @@ describe("createFalAdapter with an injected transport", () => {
     ];
     for (const [input, refs, overrides] of cases) {
       const { transport, count } = fakeTransport(overrides);
-      expect(await err(createFalAdapter("fal-flux2-edit", KEY, transport).submit(input, refs))).toBe("submission:rejected");
+      expect(await err(createFalAdapter("fal-flux2-edit", KEY, transport).submit(input, refs, open))).toBe("submission:rejected");
       expect(count("submit")).toBe(0);
     }
   });
   it("classifies submit failures: clear refusals rejected, everything else unknown", async () => {
-    const outcome = async (submit: FalTransport["submit"]) => err(createFalAdapter("fal-flux2-text", KEY, fakeTransport({ submit }).transport).submit(text, []));
+    const outcome = async (submit: FalTransport["submit"]) => err(createFalAdapter("fal-flux2-text", KEY, fakeTransport({ submit }).transport).submit(text, [], open));
     expect(await outcome(async () => { throw Object.assign(new Error("x"), { status: 422 }); })).toBe("submission:rejected");
     expect(await outcome(async () => { throw Object.assign(new Error("x"), { status: 401 }); })).toBe("submission:rejected");
     expect(await outcome(async () => { throw Object.assign(new Error("x"), { status: 500 }); })).toBe("submission:unknown");
@@ -135,7 +136,7 @@ describe("default transport: direct queue submit", () => {
   it("POSTs once to the queue REST endpoint with the key only in the Authorization header", async () => {
     const { calls, fetchMock } = httpMock(async () => Response.json({ request_id: "abc", status_url: "https://queue.fal.run/x" }));
     const transport = createDefaultFalTransport(KEY, { fetch: fetchMock, client: unusedClient });
-    expect(await transport.submit("fal-ai/flux-2", native)).toEqual({ request_id: "abc" });
+    expect(await transport.submit("fal-ai/flux-2", native, open)).toEqual({ request_id: "abc" });
     expect(calls).toHaveLength(1);
     const [call] = calls; const headers = call.init.headers as Record<string, string>;
     expect(call.url).toBe("https://queue.fal.run/fal-ai/flux-2");
@@ -159,7 +160,7 @@ describe("default transport: direct queue submit", () => {
     for (const [name, respond] of scenarios) {
       const { calls, fetchMock } = httpMock(respond);
       const transport = createDefaultFalTransport(KEY, { fetch: fetchMock, client: unusedClient, timeoutMs: 20 });
-      let error: unknown; try { await transport.submit("fal-ai/flux-2", native); } catch (e) { error = e; }
+      let error: unknown; try { await transport.submit("fal-ai/flux-2", native, open); } catch (e) { error = e; }
       expect(error, name).toBeInstanceOf(SubmissionError);
       expect((error as SubmissionError).certainty, name).toBe("unknown");
       expect((error as Error).message, name).not.toContain(KEY); expect((error as Error).message, name).not.toContain("internal");
@@ -169,11 +170,11 @@ describe("default transport: direct queue submit", () => {
   it("rejects clear refusals and unknown endpoints without extra requests", async () => {
     for (const status of [400, 401, 403, 404, 422]) {
       const { calls, fetchMock } = httpMock(async () => new Response("{}", { status }));
-      expect(await err(createDefaultFalTransport(KEY, { fetch: fetchMock, client: unusedClient }).submit("fal-ai/flux-2", native))).toBe("submission:rejected");
+      expect(await err(createDefaultFalTransport(KEY, { fetch: fetchMock, client: unusedClient }).submit("fal-ai/flux-2", native, open))).toBe("submission:rejected");
       expect(calls).toHaveLength(1);
     }
     const { calls, fetchMock } = httpMock(async () => Response.json({ request_id: "x" }));
-    expect(await err(createDefaultFalTransport(KEY, { fetch: fetchMock, client: unusedClient }).submit("evil/endpoint", native))).toBe("submission:rejected");
+    expect(await err(createDefaultFalTransport(KEY, { fetch: fetchMock, client: unusedClient }).submit("evil/endpoint", native, open))).toBe("submission:rejected");
     expect(calls).toHaveLength(0);
   });
   it("uses the injected instance SDK client for upload, status and result", async () => {

@@ -261,7 +261,7 @@ describe("tickWorker", () => {
 
 describe("recovery actions", () => {
   it("attaches a known request ID to an unknown run and completes it", async () => {
-    const mock = new MockAdapter(); const { requestId } = await mock.submit(baseCompiled, []);
+    const mock = new MockAdapter(); const { requestId } = await mock.submit(baseCompiled, [], { signal: new AbortController().signal, mayPost: () => true });
     addPreview(1); const runId = insertRun(id(1), { status: "submission_unknown", errorCode: "SUBMISSION_UNKNOWN" });
     expect(await resolveRun(deps, runId, { action: "attach", providerRequestId: requestId })).toMatchObject({ status: "queued", providerRequestId: requestId, errorCode: null });
     for (let i = 0; i < 4; i++) await tickWorker(deps, "w1");

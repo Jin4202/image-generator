@@ -11,7 +11,7 @@ type RunView = z.infer<typeof RunView>;
 const warningText: Record<C.Compiled["warnings"][number], string> = {
   SOFT_LAYOUT: "스케치·박스는 약한 레이아웃 힌트입니다. 모델이 정확히 따르지 않을 수 있습니다.",
   FULL_IMAGE_EDIT: "마스크 없이 전체 이미지를 다시 생성합니다. 보존하려는 영역도 바뀔 수 있습니다.",
-  REFERENCES_OMITTED: "Text baseline: 참조 이미지는 전송되지 않고 스타일·자산 설명만 사용됩니다.",
+  REFERENCES_OMITTED: "Text baseline: 참조 이미지는 전송되지 않고 스타일·에셋 설명만 사용됩니다.",
   NEGATIVE_AS_TEXT: "Negative 지시는 별도 필드가 없어 프롬프트 본문 텍스트로만 전달됩니다.",
 };
 const statusText: Record<C.RunStatus, string> = {

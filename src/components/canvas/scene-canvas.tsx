@@ -37,6 +37,17 @@ export function replaceSketchReference(references: SceneContent["references"], m
   return [...rest.slice(0, at), { mediaId, role: "sketch", note: "" }, ...rest.slice(at)];
 }
 
+/** T14: points the sketch reference at `index` to the new media, keeping its position and note; null if `index` is not a sketch. */
+export function setSketchAt(references: SceneContent["references"], index: number, mediaId: string): SceneContent["references"] | null {
+  if (references[index]?.role !== "sketch") return null;
+  return references.map((r, i) => i === index ? { ...r, mediaId } : r);
+}
+
+/** T14: "새 스케치" is an explicit extra sketch reference; null when the reference limit would be exceeded. */
+export function appendSketch(references: SceneContent["references"], mediaId: string): SceneContent["references"] | null {
+  return references.length >= maxReferences ? null : [...references, { mediaId, role: "sketch", note: "" }];
+}
+
 /** Uploads through the media HTTP API; the scene only ever receives an ID the server confirmed. */
 async function uploadSketch(png: Blob): Promise<string> {
   const projectId = new URLSearchParams(window.location.search).get("projectId");
@@ -56,21 +67,24 @@ async function uploadSketch(png: Blob): Promise<string> {
 type StageProps = {
   width: number; height: number; output: SceneContent["size"];
   tool: Tool; strokes: Stroke[]; boxes: SceneBox[]; canAddBox: boolean;
+  /** Saved sketch PNG drawn under the strokes (whole image mapped to the canvas); null for a blank sketch. */
+  background: HTMLImageElement | null; canDraw: boolean;
   onStroke: (stroke: Stroke) => void; onBox: (box: SceneBox["box"]) => void;
   exportRef: MutableRefObject<(() => Promise<Blob>) | null>;
 };
 
 /** Konva needs the browser canvas, so the stage is loaded on the client only. */
 const SketchStage = dynamic(async () => {
-  const { Stage, Layer, Line, Rect, Text } = await import("react-konva");
-  function SketchStageInner({ width, height, output, tool, strokes, boxes, canAddBox, onStroke, onBox, exportRef }: StageProps) {
+  const { Stage, Layer, Line, Rect, Text, Image: KonvaImage } = await import("react-konva");
+  function SketchStageInner({ width, height, output, tool, strokes, boxes, canAddBox, background, canDraw, onStroke, onBox, exportRef }: StageProps) {
     const sketchLayer = useRef<Konva.Layer>(null);
     const [draft, setDraft] = useState<Stroke | null>(null);
     const [drag, setDrag] = useState<{ from: Point; to: Point } | null>(null);
     const toPixels = (points: number[]) => points.map((p, i) => i % 2 === 0 ? p * width : p * height);
 
     useEffect(() => {
-      // White background + strokes only (boxes are layout JSON, not sketch pixels), at the scene's target size.
+      // White background + saved sketch + strokes (boxes are layout JSON, not sketch pixels), at the scene's target size.
+      // Erased areas (saved pixels included) end up white.
       exportRef.current = () => new Promise<Blob>((resolve, reject) => {
         const layer = sketchLayer.current;
         if (!layer) return reject(new Error("캔버스가 준비되지 않았습니다."));
@@ -92,7 +106,7 @@ const SketchStage = dynamic(async () => {
     const start = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       const p = pointer(event); if (!p) return;
       if (tool === "box") { if (canAddBox) setDrag({ from: p, to: p }); }
-      else setDraft({ tool, points: [...p] });
+      else if (canDraw) setDraft({ tool, points: [...p] });
     };
     const move = (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
       const p = pointer(event); if (!p) return;
@@ -108,6 +122,8 @@ const SketchStage = dynamic(async () => {
     return (
       <Stage width={width} height={height} onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end} onTouchStart={start} onTouchMove={move} onTouchEnd={end} style={{ touchAction: "none" }}>
         <Layer ref={sketchLayer}>
+          {/* Same raster layer as the strokes, so the eraser removes saved pixels too. */}
+          {background && <KonvaImage image={background} x={0} y={0} width={width} height={height} listening={false} />}
           {[...strokes, ...(draft ? [draft] : [])].map((stroke, i) => (
             <Line key={i} points={toPixels(stroke.points)} stroke="#111111" strokeWidth={stroke.tool === "eraser" ? 18 : 3} lineCap="round" lineJoin="round" tension={0.3} globalCompositeOperation={stroke.tool === "eraser" ? "destination-out" : "source-over"} />
           ))}
@@ -134,9 +150,13 @@ export function SceneCanvas(props: { value: SceneContent; onChange: (value: Scen
   const exportRef = useRef<(() => Promise<Blob>) | null>(null);
   const [available, setAvailable] = useState(720);
   const [tool, setTool] = useState<Tool>("pen");
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [label, setLabel] = useState("subject");
   const [status, setStatus] = useState<{ kind: "idle" | "saving" | "error" | "saved"; message: string }>({ kind: "idle", message: "" });
+  // T14: which sketch reference is edited (index into references) or an explicit new one; null = first sketch.
+  const [choice, setChoice] = useState<number | "new" | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [base, setBase] = useState<{ key: string; image: HTMLImageElement | null; failed: boolean } | null>(null);
+  const [drawing, setDrawing] = useState<{ key: string; strokes: Stroke[] }>({ key: "", strokes: [] });
 
   useEffect(() => {
     const element = wrapper.current; if (!element) return;
@@ -145,22 +165,48 @@ export function SceneCanvas(props: { value: SceneContent; onChange: (value: Scen
     return () => observer.disconnect();
   }, []);
 
+  const sketchIndexes = value.references.flatMap((r, i) => r.role === "sketch" && r.mediaId ? [i] : []);
+  const target: number | "new" = choice === "new" ? "new" : choice !== null && sketchIndexes.includes(choice) ? choice : sketchIndexes[0] ?? "new";
+  const targetMediaId = target === "new" ? null : value.references[target].mediaId;
+  const baseKey = targetMediaId ? `${targetMediaId}#${attempt}` : "new";
+  const baseStatus: "ready" | "loading" | "error" = !targetMediaId ? "ready" : base?.key !== baseKey ? "loading" : base.failed ? "error" : "ready";
+  const background = targetMediaId && base?.key === baseKey ? base.image : null;
+  // Strokes belong to one edit target: switching target or scene never carries them over.
+  const strokeKey = `${target}:${baseKey}`;
+  const strokes = drawing.key === strokeKey ? drawing.strokes : [];
+
+  useEffect(() => {
+    if (!targetMediaId) return;
+    const key = `${targetMediaId}#${attempt}`;
+    let current = true;
+    const image = new window.Image();
+    // A late load for a target that is no longer shown is ignored.
+    image.onload = () => { if (current) setBase({ key, image, failed: false }); };
+    image.onerror = () => { if (current) setBase({ key, image: null, failed: true }); };
+    image.src = `/api/media/${targetMediaId}`;
+    return () => { current = false; image.onload = null; image.onerror = null; };
+  }, [targetMediaId, attempt]);
+
   const scale = Math.min(available / value.size.width, 540 / value.size.height, 1);
   const width = Math.round(value.size.width * scale); const height = Math.round(value.size.height * scale);
-  const sketch = value.references.find(r => r.role === "sketch");
   const canAddBox = value.boxes.length < maxBoxes;
   const setBoxes = (boxes: SceneBox[]) => onChange({ ...value, boxes });
   const updateBox = (index: number, patch: Partial<SceneBox>) => setBoxes(value.boxes.map((b, i) => i === index ? { ...b, ...patch } : b));
+  const clearStrokes = () => setDrawing({ key: strokeKey, strokes: [] });
 
   async function saveSketch() {
+    // Never export while the saved sketch is missing: that would overwrite it with a blank drawing.
+    if (baseStatus !== "ready") return setStatus({ kind: "error", message: "기존 스케치를 불러온 뒤에 업로드할 수 있습니다." });
     if (!exportRef.current) return setStatus({ kind: "error", message: "캔버스가 준비되지 않았습니다." });
+    if (target === "new" && value.references.length >= maxReferences) return setStatus({ kind: "error", message: `참조는 최대 ${maxReferences}개입니다. 다른 참조를 먼저 제거하세요.` });
     setStatus({ kind: "saving", message: "스케치 업로드 중…" });
     try {
       const mediaId = await uploadSketch(await exportRef.current());
-      const references = replaceSketchReference(value.references, mediaId);
+      const references = target === "new" ? appendSketch(value.references, mediaId) : setSketchAt(value.references, target, mediaId);
       if (!references) throw new Error(`참조는 최대 ${maxReferences}개입니다. 다른 참조를 먼저 제거하세요.`);
       onChange({ ...value, references });
-      setStatus({ kind: "saved", message: "스케치를 업로드하고 sketch 참조를 갱신했습니다. 장면 저장 후 반영됩니다." });
+      setChoice(target === "new" ? references.length - 1 : target);
+      setStatus({ kind: "saved", message: target === "new" ? "새 스케치를 업로드해 sketch 참조로 추가했습니다. 장면 저장 후 반영됩니다." : "스케치를 업로드하고 선택한 sketch 참조만 갱신했습니다. 장면 저장 후 반영됩니다." });
     } catch (error) {
       // The scene keeps its previous references: no unconfirmed media ID is ever written.
       setStatus({ kind: "error", message: error instanceof Error ? error.message : "스케치 업로드 실패" });
@@ -180,18 +226,33 @@ export function SceneCanvas(props: { value: SceneContent; onChange: (value: Scen
         <label className="flex items-center gap-1 text-sm">새 박스 라벨
           <input value={label} maxLength={120} onChange={e => setLabel(e.target.value)} className="w-32 rounded border border-neutral-300 px-2 py-1" />
         </label>
-        <button type="button" onClick={() => setStrokes([])} disabled={strokes.length === 0} className="rounded border border-neutral-300 px-3 py-1 text-sm disabled:opacity-50">스케치 지우기</button>
-        <button type="button" onClick={saveSketch} disabled={strokes.length === 0 || status.kind === "saving"} className="rounded bg-neutral-900 px-3 py-1 text-sm text-white disabled:opacity-50">스케치 PNG 업로드</button>
+        <button type="button" onClick={clearStrokes} disabled={strokes.length === 0} className="rounded border border-neutral-300 px-3 py-1 text-sm disabled:opacity-50">스케치 지우기</button>
+        <button type="button" onClick={saveSketch} disabled={strokes.length === 0 || status.kind === "saving" || baseStatus !== "ready"} className="rounded bg-neutral-900 px-3 py-1 text-sm text-white disabled:opacity-50">스케치 PNG 업로드</button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <label className="flex items-center gap-1">편집할 스케치
+          <select value={target === "new" ? "new" : String(target)} disabled={status.kind === "saving"} onChange={e => { setChoice(e.target.value === "new" ? "new" : Number(e.target.value)); setDrawing({ key: "", strokes: [] }); }} className="rounded border border-neutral-300 px-2 py-1">
+            {sketchIndexes.map(i => <option key={i} value={String(i)}>참조 {i + 1} 스케치</option>)}
+            <option value="new">새 스케치 (참조 추가)</option>
+          </select>
+        </label>
+        {baseStatus === "loading" && <span role="status" className="text-neutral-500">기존 스케치 불러오는 중…</span>}
+        {baseStatus === "error" && (
+          <span role="alert" className="text-red-700">기존 스케치를 불러오지 못해 업로드를 막았습니다(빈 그림으로 덮어쓰지 않음).{" "}
+            <button type="button" onClick={() => setAttempt(a => a + 1)} className="underline">다시 불러오기</button>
+          </span>
+        )}
       </div>
       <div ref={wrapper} className="w-full max-w-full overflow-hidden">
         <div style={{ width, height }} className="border border-neutral-300 bg-white">
           <SketchStage width={width} height={height} output={value.size} tool={tool} strokes={strokes} boxes={value.boxes} canAddBox={canAddBox} exportRef={exportRef}
-            onStroke={stroke => setStrokes(s => [...s, stroke])}
+            background={background} canDraw={baseStatus === "ready"}
+            onStroke={stroke => setDrawing(d => ({ key: strokeKey, strokes: d.key === strokeKey ? [...d.strokes, stroke] : [stroke] }))}
             onBox={box => canAddBox && setBoxes([...value.boxes, { label: label.trim() || "box", box, zIndex: 0, facing: "" }])} />
         </div>
       </div>
-      <p className="text-xs text-neutral-500">스케치와 박스는 생성 결과를 강제하지 않는 약한 레이아웃 힌트입니다. 박스는 0..1 정규화 좌표로 저장됩니다.</p>
-      {sketch && <p className="text-sm">현재 sketch 참조: <a className="underline" href={`/api/media/${sketch.mediaId}`} target="_blank" rel="noreferrer">{sketch.mediaId}</a></p>}
+      <p className="text-xs text-neutral-500">스케치와 박스는 생성 결과를 강제하지 않는 약한 레이아웃 힌트입니다. 박스는 0..1 정규화 좌표로 저장됩니다. 저장된 스케치 위에 이어 그리면 새 PNG로 업로드되며 원본 이미지는 바뀌지 않습니다. 이전 선 단위 되돌리기는 복원되지 않습니다.</p>
+      {targetMediaId && <p className="text-sm">편집 중인 sketch 참조: <a className="underline" href={`/api/media/${targetMediaId}`} target="_blank" rel="noreferrer">{targetMediaId}</a></p>}
       <p role="status" aria-live="polite" className={`text-sm ${status.kind === "error" ? "text-red-700" : "text-neutral-700"}`}>{status.message}</p>
       {value.boxes.length > 0 && (
         <table className="w-full text-sm">

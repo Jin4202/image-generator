@@ -22,12 +22,21 @@ npm run worker
 
 - 기본 provider는 `mock`입니다. mock 결과는 1×1 테스트 이미지이며 품질 평가용이 아닙니다.
 - 데이터: `APP_DATA_DIR`(기본 `./data`)에 `studio.sqlite`와 `blobs/`가 저장됩니다. migration은 자동으로 실행되지 않습니다.
-- Next.js는 `.env.local`을 읽지만 worker/CLI는 자동으로 읽지 않습니다. `APP_DATA_DIR`, `GENERATION_PROVIDER`, `FAL_KEY`를 shell 환경변수로 두 프로세스에 똑같이 전달하세요. API 키를 명령 인수나 Git, `NEXT_PUBLIC_` 변수에 넣지 않습니다.
+- Next.js는 `.env.local`을 읽지만 worker/CLI는 자동으로 읽지 않습니다. 환경변수를 쓸 때는 `APP_DATA_DIR`, `GENERATION_PROVIDER`, `FAL_KEY`를 shell 환경변수로 두 프로세스에 똑같이 전달하세요. API 키를 명령 인수나 Git, `NEXT_PUBLIC_` 변수에 넣지 않습니다.
 - worker는 SIGINT/SIGTERM에서 진행 중인 단계를 마치고 lease를 해제한 뒤 DB를 닫습니다. 비정상 종료 후 다른 worker는 lease 만료(60초) 뒤에 이어받습니다.
+
+### fal API 키 설정 화면
+
+[설정 화면](http://127.0.0.1:3000/settings)에서 생성 모드(mock/fal)와 fal API 키를 저장할 수 있습니다.
+
+- 키는 `APP_DATA_DIR/settings/settings.json`에 **평문**으로 저장됩니다(디렉터리 0700, 파일 0600). DB·내보내기·브라우저에는 저장하지 않고, 저장한 키를 화면에 다시 보여주지 않습니다.
+- 환경변수 `GENERATION_PROVIDER`/`FAL_KEY`가 있으면 파일보다 우선합니다. 화면은 이 상태를 표시하지만 환경변수를 바꾸거나 지울 수는 없습니다.
+- 저장 후 **서버와 worker를 모두 재시작**해야 적용됩니다. 재시작이 필요한 동안 새 생성은 거부됩니다. worker는 설정 변경을 감지하면 스스로 종료합니다.
+- 진행 중인 생성(확인 필요·다운로드 실패 포함)이 있으면 변경할 수 없습니다. 저장은 fal에 연결해 보지 않으므로 키가 유효한지는 실제 생성 때 확인됩니다.
 
 ### 실제 생성 (fal, 유료)
 
-`GENERATION_PROVIDER=fal`과 `FAL_KEY`를 Next와 worker 모두에 설정하면 `fal-flux2-edit`(참조 경로)와 `fal-flux2-text`(텍스트 기준선)가 활성화됩니다. 가격은 확인되지 않은 상태(unknown)로 표시되며, 요청마다 "가격을 알 수 없음"에 명시적으로 동의해야 제출됩니다. 프로젝트 예산을 설정하면 가격 미확인 요청은 차단됩니다. 제출은 자동 재시도하지 않으며, 응답이 불명확하면 `submission_unknown`으로 멈추고 request ID 연결 또는 추적 중단을 사용자가 선택합니다. 이 저장소에서는 실제 fal 호출을 검증하지 않았습니다([모델 지원 표](docs/model-support-matrix.md)).
+설정 화면에서 fal 모드와 키를 저장하거나, `GENERATION_PROVIDER=fal`과 `FAL_KEY`를 Next와 worker 모두에 설정하면 `fal-flux2-edit`(참조 경로)와 `fal-flux2-text`(텍스트 기준선)가 활성화됩니다. 가격은 확인되지 않은 상태(unknown)로 표시되며, 요청마다 "가격을 알 수 없음"에 명시적으로 동의해야 제출됩니다. 프로젝트 예산을 설정하면 가격 미확인 요청은 차단됩니다. 제출은 자동 재시도하지 않으며, 응답이 불명확하면 `submission_unknown`으로 멈추고 request ID 연결 또는 추적 중단을 사용자가 선택합니다. 이 저장소에서는 실제 fal 호출을 검증하지 않았습니다([모델 지원 표](docs/model-support-matrix.md)).
 
 ## 검증
 

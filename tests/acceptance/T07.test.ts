@@ -9,5 +9,5 @@ it("T07 maps exactly documented native inputs without leaking keys",()=>{
 });
 it("T07 uses injected transport; no live network needed",async()=>{
  const calls:unknown[]=[];const transport={submit:async(endpoint:string,input:unknown)=>{calls.push({endpoint,input});return {request_id:"provider-1"};},status:async()=>"IN_QUEUE" as const,result:async()=>({}),upload:async()=>"https://example.com/file.png",fetchImage:async()=>new Uint8Array()};
- const adapter=createFalAdapter("fal-flux2-text","test-secret",transport);await adapter.submit({...compiled,adapterId:"fal-flux2-text",endpoint:"fal-ai/flux-2"},[]);expect(calls).toHaveLength(1);expect(JSON.stringify(calls)).not.toContain("test-secret");
+ const adapter=createFalAdapter("fal-flux2-text","test-secret",transport);await adapter.submit({...compiled,adapterId:"fal-flux2-text",endpoint:"fal-ai/flux-2"},[],{signal:new AbortController().signal,mayPost:()=>true});expect(calls).toHaveLength(1);expect(JSON.stringify(calls)).not.toContain("test-secret");
 });

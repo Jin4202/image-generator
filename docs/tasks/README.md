@@ -1,6 +1,6 @@
 # Implementation task index
 
-작업 순서는 아래 DAG를 따른다. 업무 코드 구현은 별도 세션에서 한다. 현재 모두 pending이며 skeleton smoke 통과는 task 완료가 아니다.
+작업 순서는 아래 DAG를 따른다. 업무 코드 구현은 별도 세션에서 한다. T01–T12는 완료되었으며 실제 증거는 [status.md](status.md)를 따른다. 후속 작업 T13–T18은 [후속 구현 계획](follow-up-plan.md)에 따라 구현되었다(증거는 status.md).
 
 ```text
 T01 → T02 → T03 → T04 → T05 → T06 → T08 → T09 → T10
@@ -22,6 +22,10 @@ T01..T11 ───────────────────────�
 | T10 | 제품 UI와 API client 통합 | [T10](T10.md) |
 | T11 | 실험 계획과 비교 보고 | [T11](T11.md) |
 | T12 | composition root 연결과 전체 handoff 검증 | [T12](T12.md) |
+
+## 후속 작업
+
+[검토 수정 및 사용성 개선 계획](follow-up-plan.md): T13 늦은 제출 방지, T14 스케치 복원, T15 export 무결성, T16 fal 키 입력, T17 프로젝트 편집/삭제, T18 에셋 표기. 세부 범위와 테스트 예정 경로는 각 작업 문서를 따른다.
 
 ## 다음 세션용 지시 예시
 

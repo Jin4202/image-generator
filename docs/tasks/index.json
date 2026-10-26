@@ -232,5 +232,141 @@
     "testFile": "tests/acceptance/T12.test.ts",
     "command": "npm run test:acceptance -- tests/acceptance/T12.test.ts",
     "status": "done"
+  },
+  {
+    "id": "T13",
+    "title": "늦은 유료 제출 방지",
+    "dependencies": [
+      "T06",
+      "T07",
+      "T12"
+    ],
+    "files": [],
+    "inheritedFiles": [
+      "src/application/ports.ts",
+      "src/application/services/runs.ts",
+      "src/infrastructure/models/fal-contract.ts",
+      "src/infrastructure/models/fal.ts",
+      "src/infrastructure/models/mock.ts"
+    ],
+    "testFile": "tests/acceptance/T13.cases.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T13.cases.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T14",
+    "title": "저장 스케치 이어서 편집",
+    "dependencies": [
+      "T04",
+      "T10",
+      "T12"
+    ],
+    "files": [
+      "tests/e2e-acceptance/T14.sketch.spec.ts"
+    ],
+    "inheritedFiles": [
+      "src/components/canvas/scene-canvas.tsx",
+      "src/app/scenes/page.tsx"
+    ],
+    "testFile": "tests/e2e-acceptance/T14.sketch.spec.ts",
+    "command": "npm run test:e2e:acceptance -- T14.sketch.spec.ts",
+    "status": "done"
+  },
+  {
+    "id": "T15",
+    "title": "manifest 참조 무결성 검사",
+    "dependencies": [
+      "T02",
+      "T09",
+      "T12"
+    ],
+    "files": [
+      "tests/acceptance/T15.cases.test.ts"
+    ],
+    "inheritedFiles": [
+      "src/application/services/effects.ts"
+    ],
+    "testFile": "tests/acceptance/T15.cases.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T15.cases.test.ts",
+    "status": "done"
+  },
+  {
+    "id": "T16",
+    "title": "fal API 키 입력 설정",
+    "dependencies": [
+      "T13"
+    ],
+    "files": [
+      "src/contracts/settings.ts",
+      "src/server/settings.ts",
+      "src/app/api/settings/fal/route.ts",
+      "src/app/settings/page.tsx",
+      "tests/acceptance/T16.cases.test.ts",
+      "tests/e2e-acceptance/T16.settings.spec.ts"
+    ],
+    "inheritedFiles": [
+      "src/contracts/index.ts",
+      "src/server/config.ts",
+      "src/server/create-dependencies.ts",
+      "src/server/container.ts",
+      "src/worker/main.ts",
+      "src/app/api/models/route.ts",
+      "src/app/api/health/route.ts",
+      "src/app/_studio/ui.tsx",
+      ".gitignore",
+      "README.md"
+    ],
+    "testFile": "tests/acceptance/T16.cases.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T16.cases.test.ts && npm run test:e2e:acceptance -- T16.settings.spec.ts",
+    "status": "done"
+  },
+  {
+    "id": "T17",
+    "title": "프로젝트 편집 및 삭제",
+    "dependencies": [
+      "T13",
+      "T15",
+      "T16"
+    ],
+    "files": [
+      "tests/acceptance/T17.cases.test.ts",
+      "tests/e2e-acceptance/T17.projects.spec.ts"
+    ],
+    "inheritedFiles": [
+      "src/contracts/studio.ts",
+      "src/application/ports.ts",
+      "src/application/services/projects.ts",
+      "src/infrastructure/persistence/repository.ts",
+      "src/app/api/projects/[id]/route.ts",
+      "src/app/projects/page.tsx",
+      "src/app/_studio/api.ts",
+      "src/app/_studio/ui.tsx"
+    ],
+    "testFile": "tests/acceptance/T17.cases.test.ts",
+    "command": "npm run test:acceptance -- tests/acceptance/T17.cases.test.ts && npm run test:e2e:acceptance -- T17.projects.spec.ts",
+    "status": "done"
+  },
+  {
+    "id": "T18",
+    "title": "사용자 문구 자산 → 에셋",
+    "dependencies": [
+      "T14",
+      "T16",
+      "T17"
+    ],
+    "files": [
+      "tests/e2e-acceptance/T18.wording.spec.ts"
+    ],
+    "inheritedFiles": [
+      "src/app/projects/page.tsx",
+      "src/app/scenes/page.tsx",
+      "src/app/_studio/ui.tsx",
+      "src/app/page.tsx",
+      "src/app/_studio/generation.tsx",
+      "src/app/assets/page.tsx"
+    ],
+    "testFile": "tests/e2e-acceptance/T18.wording.spec.ts",
+    "command": "npm run test:e2e:acceptance -- T18.wording.spec.ts",
+    "status": "done"
   }
 ]

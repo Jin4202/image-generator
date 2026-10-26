@@ -1,6 +1,6 @@
 # Task completion ledger
 
-Hollow architecture: verification 결과는 `docs/VERIFICATION.md`. 아래 task들은 모두 미구현.
+초기 hollow architecture 검증 snapshot은 `docs/VERIFICATION.md`. T01–T18은 아래 증거대로 완료되었다.
 
 | Task | 상태 | 증거 |
 |---|---|---|
@@ -16,6 +16,12 @@ Hollow architecture: verification 결과는 `docs/VERIFICATION.md`. 아래 task�
 | T10 | done (2026-10-26) | 아래 T10 기록 |
 | T11 | done (2026-10-26) | 아래 T11 기록 |
 | T12 | done (2026-10-26) | 아래 T12 기록 |
+| T13 | done (2026-10-26) | 아래 T13 기록 |
+| T14 | done (2026-10-26) | 아래 T14 기록 |
+| T15 | done (2026-10-26) | 아래 T15 기록 |
+| T16 | done (2026-10-26) | 아래 T16 기록 |
+| T17 | done (2026-10-26) | 아래 T17 기록 |
+| T18 | done (2026-10-26) | 아래 T18 기록 |
 
 완료 시 task별 실제 명령/결과와 날짜를 덧붙인다. index.json의 status도 함께 갱신한다.
 
@@ -455,3 +461,109 @@ schema 재확인(문서만): 사용하는 입력·출력 필드명과 범위는 
 - 실제 fal live 검증(업로드·제출·결과·비용)은 사용자 요청과 비용 확인이 필요해 실행하지 않았다.
 - 이전 세션 시점(08:51)의 acceptance 임시 디렉터리 1개(`studio-acceptance-*`, mock PNG blob 1개 포함)가 남아 있어 삭제했다. 어떤 테스트가 dispose 후 blob을 썼을 가능성이 있으나 최종 전체 실행에서는 재현되지 않았다.
 - `docs/VERIFICATION.md`와 `docs/tasks/README.md`의 "hollow/pending" 서술은 설계 시점 snapshot이라 소유 범위 밖이어서 수정하지 않았다. 현재 상태는 이 status.md와 README가 기준이다.
+
+## 후속 계획 등록 (2026-10-26)
+
+[후속 구현 계획](follow-up-plan.md)에 T13–T18을 추가했다. 이번에는 문서만 변경했으며 제품 구현이나 신규 테스트 통과를 의미하지 않는다.
+
+| Task | 상태 | 목표 |
+|---|---|---|
+| T13 | done | timeout/lease 상실 후 유료 POST 방지 |
+| T14 | done | 저장 스케치 복원과 이어서 편집 |
+| T15 | done | manifest 전체 참조 무결성 검사 |
+| T16 | done | fal API 키 입력/저장/적용 |
+| T17 | done | 프로젝트 제목·예산 편집/삭제 |
+| T18 | done | 사용자 문구 자산 → 에셋 |
+
+## T13 — 늦은 유료 제출 방지 (2026-10-26)
+
+변경 파일
+- `src/application/ports.ts`: `SubmitContext { signal, mayPost() }`, `ModelAdapter.submit(input, refs, context)`.
+- `src/application/services/runs.ts`: 시도당 AbortController. 30초 deadline·heartbeat lease 상실·시도 종료가 같은 signal을 abort하고, lease 상실 시 upload를 기다리지 않고 반환. `mayPost`는 동기 transaction에서 owner lease 갱신 + run이 시도 시작 revision의 `submitting`인지 확인.
+- `src/infrastructure/models/fal-contract.ts`, `fal.ts`: `FalTransport.submit(endpoint, input, context)`. adapter는 upload마다 signal 확인, POST 직전 `mayPost` 재검사. 기본 transport는 검사와 fetch 호출을 같은 동기 단계에서 하고 `AbortSignal.any([context.signal, timeout])`을 fetch에 전달. 취소/거부는 fetch 없이 `SubmissionError("rejected")`.
+- `src/infrastructure/models/mock.ts`: 같은 게이트.
+- signature 적응만: `src/server/demo.ts`, `tests/acceptance/T06.cases.test.ts`, `T07.cases.test.ts`, `T07.test.ts`, `T12.cases.test.ts`, `tests/contracts/mock.test.ts`(열린 context 전달).
+- 신규 `tests/acceptance/T13.cases.test.ts`(12 cases).
+- 문서: contracts runs/fal, architecture 흐름 3단계, ADR 004 amendment(T13).
+- inventory: `index.json`에 `inheritedFiles`(완료 작업/설계 공유 파일 이관) 도입, `scripts/check-handoff.mjs`가 같은 파일을 이어받는 후속 작업 사이에 의존 경로가 있는지 검사.
+
+실행 결과
+- `npm run test:acceptance -- tests/acceptance/T13.cases.test.ts` → 12 passed. 수정 전 코드(runs/fal 되돌림)에서는 8 failed로 회귀를 잡는 것을 확인.
+- `npm run test:acceptance -- tests/acceptance/T06 tests/acceptance/T07` → 통과(T12 포함 5 files 55 tests).
+
+보장 범위: 이미 진행 중인 SDK upload는 중단할 수 없고, 출발한 POST의 abort는 provider 취소/환급이 아니다(그 경우 기존대로 `submission_unknown`, 재제출 0). exactly-once 주장 아님.
+
+## T14 — 저장 스케치 이어서 편집 (2026-10-26)
+
+변경 파일
+- `src/components/canvas/scene-canvas.tsx`: 편집 대상 선택("편집할 스케치": sketch 참조별 + "새 스케치 (참조 추가)"). 대상 PNG를 sketch layer 바탕(Konva Image, 전체 이미지를 현재 canvas 크기로 매핑)으로 로드하고 같은 layer에 stroke를 그려 지우개가 바탕에도 작용. 로딩/실패 중 그리기·업로드 차단(실패 시 "다시 불러오기"), 대상/장면 전환 시 stroke 초기화, 늦은 load 무시. 업로드 성공 후 선택한 참조 하나만 새 media로 교체(`setSketchAt`, 메모 유지) 또는 명시적 추가(`appendSketch`). 기존 `replaceSketchReference`는 T04 테스트용으로 유지.
+- `src/app/scenes/page.tsx`: 변경 없음(장면 저장 CAS·충돌 안내 기존 흐름 사용).
+- 신규 `tests/e2e-acceptance/T14.sketch.spec.ts`(4 cases, production stack, 화면 canvas와 업로드 PNG 픽셀 검사).
+
+실행 결과
+- `npm run test:e2e:acceptance -- T14.sketch.spec.ts` → 4 passed.
+- `npm run test:acceptance -- tests/acceptance/T04` → 14 passed.
+
+결정: 스케치 업로드는 draft의 참조만 바꾸고 서버 반영은 기존 "장면 저장"(CAS)으로 한다(업로드 성공 후 저장, 충돌 시 서버 scene 보존). 저장 후 editor가 새 revision으로 다시 마운트되면 편집 대상은 첫 sketch로 돌아간다. 이전 stroke 단위 undo는 복원하지 않는다.
+
+## T15 — manifest 참조 무결성 검사 (2026-10-26)
+
+변경 파일
+- `src/application/services/effects.ts`: `verifyMediaFiles` — workspace snapshot 고정 후 manifest가 열거할 모든 media + 합성 입력을 쓰기 전에 읽어 byte 수·SHA-256(crypto.subtle)·`imageInspector` decode MIME/width/height를 record와 비교. 같은 path는 한 번만 읽고 decode, record마다 비교. 실패는 경로 없는 STORAGE. 검증한 bytes를 그대로 합성.
+- 신규 `tests/acceptance/T15.cases.test.ts`(10 cases). 문서: contracts effects 절.
+
+실행 결과
+- `npm run test:acceptance -- tests/acceptance/T15.cases.test.ts` → 10 passed(수정 전 코드에서는 8 failed).
+- `npm run test:acceptance -- tests/acceptance/T09` → 16 passed.
+
+## T16 — fal API 키 입력 설정 (2026-10-26)
+
+계약 결정: 설정 변경과 신규 submit의 경쟁은 사용자 승인 A안(서버 프로세스 내 게이트, docs/blockers.md T16, ADR 005).
+
+변경 파일
+- 신규 `src/contracts/settings.ts`(`ProviderMode`, `FalSettingsInput`, `FalSettings`), `src/server/settings.ts`(파일 읽기/atomic 쓰기, `loadEffectiveConfig`, 직렬화된 변경), `src/app/api/settings/fal/route.ts`(GET/PUT/DELETE), `src/app/settings/page.tsx`.
+- `src/server/config.ts`: `loadConfig(env, stored?)` 순수 우선순위(env > 파일 > mock), `keySource/modeSource`, `sameRuntime`.
+- `src/server/container.ts`: 시작 시에만 설정 파일 반영, 생성 게이트(공유 adapter map 비우기), `getLoadedConfig`, `isRestartPending`, `getSettingsHost`.
+- `src/worker/main.ts`: 시작 시 env+파일, 2초마다 재확인 후 다르면 정상 종료(재시작 요구).
+- `src/app/api/models/route.ts`(재시작 대기 시 전부 `RESTART_REQUIRED`), `src/app/api/health/route.ts`(`restartRequired` 추가), `src/app/_studio/ui.tsx`(메뉴 "설정"), `src/contracts/index.ts`, `.gitignore`, `README.md`.
+- `src/server/create-dependencies.ts`: 변경 없음.
+- 신규 `tests/acceptance/T16.cases.test.ts`(14 cases, 실제 worker 자식 프로세스 포함), `tests/e2e-acceptance/T16.settings.spec.ts`(2 cases).
+- 문서: contracts Config/HTTP/models, architecture 보안 경계, ADR 005, blockers T16(resolved).
+
+실행 결과
+- `npm run test:acceptance -- tests/acceptance/T16.cases.test.ts` → 14 passed.
+- `npm run test:e2e:acceptance -- T16.settings.spec.ts` → 2 passed.
+- 실제 fal 요청 0회(fal 모드 run은 제출하지 않음, worker는 시작/종료만 확인).
+
+제한: 서버 프로세스가 하나라는 가정(로컬 단일 사용자). 키는 평문 로컬 파일. 저장은 키 유효성을 확인하지 않는다.
+
+## T17 — 프로젝트 편집 및 삭제 (2026-10-26)
+
+변경 파일
+- `src/contracts/studio.ts`: `UpdateProject`, `DeleteProject`, `ProjectDeleted`.
+- `src/application/ports.ts`: `UnitOfWork.deleteProject(projectId)`. `src/infrastructure/persistence/repository.ts`: FK 순서 삭제(effects→…→projects), 같은 transaction 참여. migration 추가 없음.
+- `src/application/services/projects.ts`: `updateProject`(CAS rev+1), `deleteProject`(존재/CAS/같은 프로젝트 active run 검사 후 삭제, blob 유지).
+- `src/app/api/projects/[id]/route.ts`: PATCH/DELETE(same-origin). `src/app/projects/page.tsx`: 편집 폼(예산 하향 안내), 제목을 명시한 삭제 확인(취소 시 요청 0), 삭제 후 projectId/sceneId/candidateId/runId/experimentId 선택 해제. `src/app/_studio/api.ts`: 404 안내 문구. `src/app/_studio/ui.tsx`: 변경 없음.
+- signature 적응: `tests/support/dependencies.ts` stub에 `deleteProject`.
+- 신규 `tests/acceptance/T17.cases.test.ts`(14 cases), `tests/e2e-acceptance/T17.projects.spec.ts`(3 cases). 문서: contracts projects/repository/HTTP, ADR 002 amendment.
+
+실행 결과
+- `npm run test:acceptance -- tests/acceptance/T17.cases.test.ts` → 14 passed.
+- `npm run test:e2e:acceptance -- T17.projects.spec.ts` → 3 passed.
+- `npm run test:acceptance -- tests/acceptance/T01 tests/acceptance/T03` → 33 passed.
+
+## T18 — 사용자 문구 자산 → 에셋 (2026-10-26)
+
+변경 파일: `src/app/{page,projects/page,scenes/page,assets/page}.tsx`, `src/app/_studio/{ui,generation}.tsx`의 사용자 문구만 치환(식별자·URL·API·DB 불변). 기존 테스트와 README에는 해당 문구가 없어 수정하지 않았다. 신규 `tests/e2e-acceptance/T18.wording.spec.ts`(메뉴/페이지 문구, 에셋 승인→장면 선택 흐름, 사용자 입력 원문 보존).
+
+실행 결과
+- `grep -rn '자산' src/app src/components` → 0건(exit 1, 성공 조건).
+- `npm run test:e2e:acceptance -- T18.wording.spec.ts` → 1 passed.
+
+## T13–T18 공통 완료 gate (2026-10-26)
+
+- `npm run verify` → exit 0 (handoff inventory 18 tasks, boundaries, lint, typecheck, unit 7 files/30 tests, production build).
+- `npm run test:acceptance` → 26 files / 229 tests passed.
+- `npm run test:e2e` → 2 passed.
+- `npm run test:e2e:acceptance` → 23 passed, skip 0 (T10/T11 mock API, T12/T14/T16/T17/T18 실제 production stack).
+- 실제 fal 호출·과금 없음. 개발 DB(./data)에 디버깅용으로 만든 프로젝트 1개는 새 DELETE API로 삭제했다.

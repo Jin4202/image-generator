@@ -110,18 +110,27 @@ export async function retryDownload(deps: Dependencies, id: string): Promise<C.R
 
 type Outcome<T> = { kind: "ok"; value: T } | { kind: "error"; error: unknown } | { kind: "timeout" };
 
-/** Runs one external call with a timeout while renewing the lease; a lost lease forbids recording further side effects. */
-async function external<T>(deps: Dependencies, owner: string, work: () => Promise<T>): Promise<{ outcome: Outcome<T>; leaseLost: boolean }> {
+/**
+ * Runs one external call with a timeout while renewing the lease; a lost lease forbids recording further side effects.
+ * T13: the deadline, a lost lease and the end of the attempt abort the same signal, so late work cannot start a paid request.
+ */
+async function external<T>(deps: Dependencies, owner: string, work: (signal: AbortSignal) => Promise<T>): Promise<{ outcome: Outcome<T>; leaseLost: boolean }> {
+  const controller = new AbortController();
   let leaseLost = false; let timer: ReturnType<typeof setTimeout> | undefined;
   const heartbeat = setInterval(() => {
     try { const now = deps.now(); if (!deps.repo.acquireLease(owner, now, later(now, C.Limits.leaseMs))) leaseLost = true; } catch { leaseLost = true; }
+    if (leaseLost) controller.abort();
   }, heartbeatMs);
   try {
-    const timeout = new Promise<Outcome<T>>(resolve => { timer = setTimeout(() => resolve({ kind: "timeout" }), externalTimeoutMs); });
-    const call = Promise.resolve().then(work).then(value => ({ kind: "ok" as const, value }), (error: unknown) => ({ kind: "error" as const, error }));
-    return { outcome: await Promise.race([call, timeout]), leaseLost };
+    // Abort first so a pending authorization check already sees the cancellation, then stop waiting.
+    const stopped = new Promise<Outcome<T>>(resolve => {
+      controller.signal.addEventListener("abort", () => resolve({ kind: "timeout" }), { once: true });
+      timer = setTimeout(() => controller.abort(), externalTimeoutMs);
+    });
+    const call = Promise.resolve().then(() => work(controller.signal)).then(value => ({ kind: "ok" as const, value }), (error: unknown) => ({ kind: "error" as const, error }));
+    return { outcome: await Promise.race([call, stopped]), leaseLost };
   } finally {
-    clearInterval(heartbeat); clearTimeout(timer);
+    clearInterval(heartbeat); clearTimeout(timer); controller.abort();
   }
 }
 
@@ -156,7 +165,19 @@ async function stepDraft(deps: Dependencies, owner: string, run: C.Run, adapter:
     commit(deps, owner, submitting, { status: "failed", errorCode: "REFERENCE_UNAVAILABLE" });
     return;
   }
-  const { outcome, leaseLost } = await external(deps, owner, () => adapter.submit(submitting.compiled, references));
+  // Synchronous last check before the paid request: this owner still holds the lease and the run has not moved.
+  const authorized = (signal: AbortSignal) => () => {
+    if (signal.aborted) return false;
+    try {
+      return deps.repo.transaction(tx => {
+        const now = deps.now();
+        if (!tx.acquireLease(owner, now, later(now, C.Limits.leaseMs))) return false;
+        const current = tx.get("runs", submitting.id);
+        return current !== null && current.status === "submitting" && current.revision === submitting.revision;
+      });
+    } catch { return false; }
+  };
+  const { outcome, leaseLost } = await external(deps, owner, signal => adapter.submit(submitting.compiled, references, { signal, mayPost: authorized(signal) }));
   if (leaseLost) return;
   if (outcome.kind === "ok") commit(deps, owner, submitting, { status: "queued", providerRequestId: outcome.value.requestId, errorCode: null });
   else if (outcome.kind === "timeout") commit(deps, owner, submitting, { status: "submission_unknown", errorCode: "SUBMISSION_TIMEOUT" });

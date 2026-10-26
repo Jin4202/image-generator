@@ -45,3 +45,5 @@ next-env.d.ts
 /playwright-report/
 /test-results/
 !.env.example
+# T16 local provider settings (plain-text API key) if APP_DATA_DIR points inside the repo
+settings/settings.json

@@ -6,7 +6,7 @@ import { MediaSelect, Thumb, UploadMedia, mediaLabel } from "../_studio/media";
 import { ErrorText, Loaded, NeedProject, PageShell, Panel, buttonClass, inputClass, secondaryButtonClass, useSelection, useWorkspace } from "../_studio/ui";
 
 export default function Page() {
-  return <PageShell title="자산"><AssetsView /></PageShell>;
+  return <PageShell title="에셋"><AssetsView /></PageShell>;
 }
 
 const slotKinds = ["front", "three_quarter", "side", "back", "face", "expression", "equipment"] as const;
@@ -62,15 +62,15 @@ function AssetForm({ ws, onCreated }: { ws: C.Workspace; onCreated: () => void }
   }
 
   return (
-    <Panel title="캐릭터·오브젝트 자산 만들기">
+    <Panel title="캐릭터·오브젝트 에셋 만들기">
       <label className="flex flex-wrap items-center gap-2 text-sm">대상
         <select className={inputClass} value={logicalId} onChange={e => setLogicalId(e.target.value)}>
-          <option value="new">새 자산</option>
+          <option value="new">새 에셋</option>
           {logicalIds.map(([id, n]) => <option key={id} value={id}>{n}의 새 버전</option>)}
         </select>
       </label>
       <div className="flex flex-wrap gap-2 text-sm">
-        <input className={inputClass} aria-label="자산 이름" placeholder="이름" maxLength={120} value={name} onChange={e => setName(e.target.value)} />
+        <input className={inputClass} aria-label="에셋 이름" placeholder="이름" maxLength={120} value={name} onChange={e => setName(e.target.value)} />
         <select className={inputClass} aria-label="종류" value={kind} onChange={e => setKind(e.target.value as "character" | "object")}><option value="character">캐릭터</option><option value="object">오브젝트</option></select>
       </div>
       <textarea className={`${inputClass} w-full`} aria-label="불변 특징" rows={3} placeholder="항상 유지할 특징 (얼굴 흉터, 머리색 등)" maxLength={4000} value={invariants} onChange={e => setInvariants(e.target.value)} />
@@ -90,7 +90,7 @@ function AssetForm({ ws, onCreated }: { ws: C.Workspace; onCreated: () => void }
         {duplicateSlot && <p className="text-sm text-amber-300">같은 슬롯 종류를 두 번 쓸 수 없습니다.</p>}
         <p className="text-xs text-slate-400">없는 각도의 이미지는 만들어지지 않습니다. 업로드한 이미지만 사용됩니다.</p>
       </div>
-      <button type="button" className={buttonClass} disabled={!valid || busy} onClick={create}>자산 저장 (초안)</button>
+      <button type="button" className={buttonClass} disabled={!valid || busy} onClick={create}>에셋 저장 (초안)</button>
       <ErrorText error={error} />
     </Panel>
   );
@@ -105,9 +105,9 @@ function AssetList({ ws, onChanged }: { ws: C.Workspace; onChanged: () => void }
   }
   return (
     <div className="lg:col-span-2">
-      <Panel title="자산 버전">
+      <Panel title="에셋 버전">
         <ErrorText error={error} />
-        {groups.length === 0 ? <p className="text-sm text-slate-400">아직 자산이 없습니다.</p> : (
+        {groups.length === 0 ? <p className="text-sm text-slate-400">아직 에셋이 없습니다.</p> : (
           <ul className="space-y-4">
             {groups.map(versions => (
               <li key={versions[0].logicalId} className="space-y-2">
@@ -126,7 +126,7 @@ function AssetList({ ws, onChanged }: { ws: C.Workspace; onChanged: () => void }
             ))}
           </ul>
         )}
-        <p className="text-xs text-slate-400">승인된 버전은 수정되지 않습니다. 바꾸려면 같은 자산의 새 버전을 만드세요. 기존 생성 이력은 당시 버전을 유지합니다.</p>
+        <p className="text-xs text-slate-400">승인된 버전은 수정되지 않습니다. 바꾸려면 같은 에셋의 새 버전을 만드세요. 기존 생성 이력은 당시 버전을 유지합니다.</p>
       </Panel>
     </div>
   );

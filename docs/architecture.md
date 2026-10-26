@@ -57,7 +57,7 @@ SQLite: FK ON, WAL, busy_timeout=5000. explicit migration 먼저, openRepository
 
 1. createPreview: scene/media/승인 style·asset 읽기 → snapshot 고정 → compile → canonical SHA-256 → 15분 expiry 저장.
 2. submitRun: preview/hash/expiry/현재 scene revision/비용 확인 → transaction 내 replay 검사·전역 active cap 확인 → draft run 생성. HTTP는 provider에 제출하지 않는다.
-3. worker: lease 확보 → draft를 submitting으로 commit → 참조 파일 읽기/upload → provider submit 1회 → request ID와 queued commit.
+3. worker: lease 확보 → draft를 submitting으로 commit → 참조 파일 읽기/upload → POST 직전 동기 권한 재검사(lease·run revision, T13) → provider submit 1회 → request ID와 queued commit. deadline/lease 상실은 같은 취소 신호로 이후 upload·POST를 막는다.
 4. queued/running은 poll만, completed이면 downloading을 먼저 commit → download/검증/파일 저장 → candidate/미디어와 succeeded를 한 DB transaction에 commit.
 5. 원본을 선택해 refine preview 생성 → 일반 submit 흐름 사용. 부모 후보/이전 run은 변경하지 않는다.
 6. effects JSON 저장 → sharp로 deterministic export → PNG와 versioned manifest.
@@ -81,7 +81,7 @@ downloading -> download_failed -> downloading (명시적 다운로드 재시도)
 
 ## 보안·운영 경계
 
-127.0.0.1에만 listen. 브라우저 mutation은 same-origin; origin 없는 CLI/테스트 요청은 허용한다. 원격 공개 배포용 인증/CSRF 시스템이 아니며 공개 배포는 범위 밖이다. JSON 64KiB, upload 10MiB/16MP, 파일 실제 디코딩, path confinement를 고정한다. provider 응답 URL은 외부 입력으로 보고 HTTPS와 public IP 검증, redirect마다 재검증한다. 가격 unknown은 0이 아니다.
+127.0.0.1에만 listen. 브라우저 mutation은 same-origin; origin 없는 CLI/테스트 요청은 허용한다. 원격 공개 배포용 인증/CSRF 시스템이 아니며 공개 배포는 범위 밖이다. JSON 64KiB, upload 10MiB/16MP, 파일 실제 디코딩, path confinement를 고정한다. provider 응답 URL은 외부 입력으로 보고 HTTPS와 public IP 검증, redirect마다 재검증한다. 가격 unknown은 0이 아니다. fal 키는 env 또는 `APP_DATA_DIR/settings/settings.json`(평문, 0600/0700, T16)에만 있고 server/worker 프로세스 메모리 밖으로 나가지 않는다. 설정 변경은 서버와 worker 재시작 후 적용된다([ADR 005](decisions/005-local-provider-settings.md)).
 
 ## 설계 고정 / 위임
 

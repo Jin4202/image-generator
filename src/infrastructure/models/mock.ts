@@ -1,16 +1,18 @@
 import { randomUUID } from "node:crypto";
-import type { ModelAdapter, ProviderOutput, ProviderStatus } from "../../application/ports";
+import type { ModelAdapter, ProviderOutput, ProviderStatus, SubmitContext } from "../../application/ports";
 import { Compiled } from "../../contracts";
-import { AppError } from "../../domain/errors";
+import { AppError, SubmissionError } from "../../domain/errors";
 // 1x1 PNG fixture: transport test only, NOT artwork or requested dimensions.
 export const MOCK_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMw2rLgPwAFKAKGnFz99AAAAABJRU5ErkJggg==";
 export class MockAdapter implements ModelAdapter {
   readonly id = "mock-reference" as const;
   private polls = new Map<string, number>();
   constructor(private readonly outcome: "success" | "failure" = "success") {}
-  async submit(input: Compiled, references: readonly Uint8Array[]) {
+  async submit(input: Compiled, references: readonly Uint8Array[], context: SubmitContext) {
     Compiled.parse(input);
     if (input.adapterId !== this.id || references.length !== input.references.length || references.length > 4) throw new AppError("VALIDATION", "Mock reference mapping mismatch");
+    // Same T13 gate as a paid adapter: issuing the request ID stands in for the POST.
+    if (context.signal.aborted || !context.mayPost()) throw new SubmissionError("rejected", "Submit attempt was cancelled");
     return { requestId: `mock:${randomUUID()}:${input.parameters.num_images}:${input.parameters.seed ?? "none"}:${this.outcome}` };
   }
   private decode(requestId: string) {

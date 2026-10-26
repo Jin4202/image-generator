@@ -23,13 +23,38 @@ function mediaIn(tx: UnitOfWork, projectId: string, mediaId: string): C.Media {
   if (!media || media.projectId !== projectId) throw new AppError("NOT_FOUND", "Media not found");
   return media;
 }
-/** Reads a blob for export; a missing file, changed bytes or size mismatch is a storage failure. */
-async function readMediaBytes(deps: Dependencies, media: C.Media): Promise<Uint8Array> {
-  let bytes: Uint8Array;
-  try { bytes = await deps.blobs.read(media.relativePath); }
-  catch { throw new AppError("STORAGE", "Media file is missing or changed"); }
-  if (bytes.length !== media.bytes) throw new AppError("STORAGE", "Media file does not match its record");
-  return bytes;
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * T15: reads and checks every media the manifest will list (plus the render inputs) before anything is written.
+ * Each record must match its file: byte count, SHA-256 and the decoded MIME/size. Any mismatch is STORAGE without
+ * paths or raw errors. Files shared by several records are read and decoded once; each record is still compared.
+ * Runs outside any DB transaction. Returns the verified bytes by relative path.
+ */
+async function verifyMediaFiles(deps: Dependencies, media: readonly C.Media[]): Promise<Map<string, Uint8Array>> {
+  const files = new Map<string, Promise<{ bytes: Uint8Array; sha256: string; info: Awaited<ReturnType<Dependencies["imageInspector"]["inspect"]>> } | null>>();
+  const load = (path: string) => {
+    let pending = files.get(path);
+    if (!pending) {
+      pending = (async () => {
+        try {
+          const bytes = await deps.blobs.read(path);
+          return { bytes, sha256: await sha256Hex(bytes), info: await deps.imageInspector.inspect(bytes) };
+        } catch { return null; }
+      })();
+      files.set(path, pending);
+    }
+    return pending;
+  };
+  const checked = await Promise.all(media.map(async m => ({ m, file: await load(m.relativePath) })));
+  for (const { m, file } of checked) {
+    if (!file) throw new AppError("STORAGE", "A referenced media file is missing or unreadable");
+    if (file.bytes.length !== m.bytes || file.sha256 !== m.sha256 || file.info.mime !== m.mime || file.info.width !== m.width || file.info.height !== m.height) throw new AppError("STORAGE", "A referenced media file does not match its record");
+  }
+  return new Map(checked.map(({ m, file }) => [m.relativePath, file!.bytes]));
 }
 
 /** T09: docs/contracts.md#effects. Preserve signature; implement all listed invariants. */
@@ -74,15 +99,16 @@ export async function exportCandidate(deps: Dependencies, input: z.infer<typeof 
     return { candidate, base: mediaIn(tx, candidate.projectId, candidate.mediaId), effects, overlays: ordered.map(layer => ({ layer, media: mediaIn(tx, candidate.projectId, layer.mediaId) })) };
   });
   const content = effects?.content ?? identity;
-  // Manifest snapshot is the workspace immediately before this export's PNG media and record exist.
+  // Manifest snapshot is the workspace immediately before this export's PNG media and record exist; it stays fixed from here.
   const workspace = await getWorkspace(deps, candidate.projectId);
 
   // All file work happens before the DB commit; any failure here leaves the database untouched.
-  const baseBytes = await readMediaBytes(deps, base);
+  const verified = await verifyMediaFiles(deps, [...workspace.media, base, ...overlays.map(o => o.media)]);
+  const bytesOf = (media: C.Media) => verified.get(media.relativePath)!;
   const rendered = await deps.imageCompositor.composite({
-    base: baseBytes,
+    base: bytesOf(base),
     adjustments: { brightness: content.brightness, contrast: content.contrast, saturation: content.saturation, blur: content.blur },
-    overlays: await Promise.all(overlays.map(async ({ layer, media }) => ({ bytes: await readMediaBytes(deps, media), layer }))),
+    overlays: overlays.map(({ layer, media }) => ({ bytes: bytesOf(media), layer })),
   });
   const png = await deps.blobs.write(rendered.bytes, "png");
   const exportedAt = deps.now();

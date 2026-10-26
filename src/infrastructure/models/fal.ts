@@ -2,7 +2,7 @@ import { createFalClient, type FalClient } from "@fal-ai/client";
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
-import type { ModelAdapter, ProviderOutput, ProviderStatus } from "../../application/ports";
+import type { ModelAdapter, ProviderOutput, ProviderStatus, SubmitContext } from "../../application/ports";
 import { Compiled, Limits } from "../../contracts";
 import { AppError, SubmissionError } from "../../domain/errors";
 import { FalInput, FalOutput, type FalTransport } from "./fal-contract";
@@ -33,6 +33,12 @@ export function isPublicAddress(address: string): boolean {
 }
 
 const providerError = (code: string): never => { throw new AppError("PROVIDER", code); };
+/** T13: the attempt may still post only if it is not cancelled and the synchronous authorization holds (a throwing check means no). */
+function mayStillPost(context: SubmitContext): boolean {
+  if (context.signal.aborted) return false;
+  try { return context.mayPost() === true; } catch { return false; }
+}
+const cancelled = () => new SubmissionError("rejected", "Submit attempt was cancelled before the paid request");
 const isPng = (bytes: Uint8Array) => pngSignature.every((b, i) => bytes[i] === b);
 function mimeOf(bytes: Uint8Array): string {
   if (isPng(bytes)) return "image/png";
@@ -112,12 +118,16 @@ export function createDefaultFalTransport(key: string, options: DefaultTransport
   const client = options.client ?? createFalClient({ credentials: key, retry: { maxRetries: 0 } });
   const open = options.open ?? defaultOpen();
   return {
-    async submit(endpoint, input) {
+    async submit(endpoint, input, context) {
       if (!knownEndpoints.has(endpoint)) throw new SubmissionError("rejected", "Unknown fal endpoint");
+      const payload = JSON.stringify(input);
+      const signal = AbortSignal.any([context.signal, AbortSignal.timeout(timeoutMs)]);
       let response: Response;
+      // Last authorization and the fetch call run in the same synchronous step: nothing can await in between.
+      if (!mayStillPost(context)) throw cancelled();
       try {
         // Exactly one POST: no SDK retry loop, no redirect following, bounded wait.
-        response = await fetchImpl(`https://queue.fal.run/${endpoint}`, { method: "POST", headers: { Authorization: `Key ${key}`, "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(input), redirect: "error", signal: AbortSignal.timeout(timeoutMs) });
+        response = await fetchImpl(`https://queue.fal.run/${endpoint}`, { method: "POST", headers: { Authorization: `Key ${key}`, "Content-Type": "application/json", Accept: "application/json" }, body: payload, redirect: "error", signal });
       } catch { throw new SubmissionError("unknown", "fal queue submit did not complete"); }
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
@@ -182,21 +192,26 @@ export function createFalAdapter(id: "fal-flux2-edit" | "fal-flux2-text", key: s
   const t = transport ?? createDefaultFalTransport(key);
   return {
     id,
-    async submit(input, references) {
+    async submit(input, references, context) {
       let native: FalInput;
       try {
         const compiled = Compiled.parse(input);
         if (compiled.adapterId !== id || compiled.endpoint !== endpoint) throw new Error("adapter mismatch");
         if (references.length !== compiled.references.length || references.some(r => !(r instanceof Uint8Array) || r.length === 0)) throw new Error("reference mapping mismatch");
         const urls: string[] = [];
-        // Temporary upload URLs live only in memory, in reference order.
-        for (const bytes of references) urls.push(await t.upload(bytes));
+        // Temporary upload URLs live only in memory, in reference order. An upload cannot be stopped, but a cancelled
+        // attempt starts no further upload and never reaches the POST.
+        for (const bytes of references) {
+          if (context.signal.aborted) throw new Error("cancelled");
+          urls.push(await t.upload(bytes));
+        }
         native = buildFalInput(compiled, urls);
       } catch {
-        throw new SubmissionError("rejected", "Request was not submitted: invalid input or reference upload failed");
+        throw new SubmissionError("rejected", "Request was not submitted: invalid input, reference upload failed or attempt cancelled");
       }
+      if (!mayStillPost(context)) throw cancelled();
       let response: { request_id: string };
-      try { response = await t.submit(endpoint, native); }
+      try { response = await t.submit(endpoint, native, context); }
       catch (error) { throw new SubmissionError(certaintyOf(error), "fal queue submit failed"); }
       const requestId = response?.request_id;
       if (typeof requestId !== "string" || !requestId.trim() || requestId.length > 500) throw new SubmissionError("unknown", "fal queue submit returned no request_id");

@@ -15,6 +15,7 @@ HTTP JSON 성공 `{data:T}`, 실패 `{error:{code,message}}`; 성공 200 (생성
 - insert는 revision 0, 모든 ID/scope/schema 검증. projectId 존재 검사; Project는 projectId=id.
 - replace는 existing revision=expectedRevision AND new revision=expected+1, id/project/createdAt 고정. 허용 mutation은 architecture 저장 절. 불변 필드 변경은 CONFLICT. missing→NOT_FOUND.
 - transaction은 BEGIN IMMEDIATE, throw rollback, 성공 commit. Promise 반환하면 rollback+VALIDATION(비동기 callback 금지). nested transaction 금지 VALIDATION. closed handle 사용→STORAGE.
+- `deleteProject(projectId)` (T17): 프로젝트와 그 projectId의 모든 record를 FK 순서(effects→reviews→exports→experiments→candidates→runs→previews→scenes→styles→assets→media→projects)로 같은 transaction에서 삭제한다(밖에서 호출하면 자체 BEGIN IMMEDIATE). missing→NOT_FOUND. 검사 정책(CAS/active)은 service 책임. blob 파일은 건드리지 않는다.
 - lease singleton id=1. `acquireLease(owner,now,until)`은 until>now, 기존 없거나 expired 또는 같은 owner만 허용; false는 다른 active owner. release는 해당 owner만 삭제, 없는 lease는 no-op.
 - 예: insert project(rev0) → reopen get 동일; replace title rev1 expected0 성공, 다시 expected0은 CONFLICT.
 - 부수효과/의존성: SQLite만, Drizzle/better-sqlite3. SQL은 parameter binding. T01은 포트 구현체만 작성.
@@ -35,7 +36,9 @@ HTTP JSON 성공 `{data:T}`, 실패 `{error:{code,message}}`; 성공 200 (생성
 - createProject(CreateProject)→Project: title trim 1..120, budgetMicros nullable 정수. id=projectId, rev0, clock 사용. 빈 문자열 VALIDATION. 영구 저장 후 반환.
 - listProjects/getProject/getWorkspace: project 존재 확인. Workspace는 해당 프로젝트의 media/styles/assets/scenes/runs/candidates/reviews/effects/exports/experiments만. preview는 별도 submit 참조용이며 workspace에는 포함하지 않는다. 절대 path/환경변수 포함 금지.
 - 예: `{title:" Wind Duel "}`→title `Wind Duel`, budgetMicros null. budget null은 한도 미설정이지 무제한 과금 동의가 아니다.
-- UI /projects: 생성/목록/선택. 선택 projectId는 URL query로 전달한다. title/budget 수정·삭제는 MVP API 밖.
+- UI /projects: 생성/목록/선택/편집/삭제. 선택 projectId는 URL query로 전달한다.
+- updateProject(id, UpdateProject{expectedRevision,title,budgetMicros})→Project (T17): CreateProject와 같은 필드 검증, CAS revision+1, id/createdAt/과거 run snapshot 불변. 예산 하향은 이전 비용을 지우거나 접수된 run을 취소하지 않으며 이후 submit의 누적 비용 검사에만 적용된다. stale→CONFLICT, missing→NOT_FOUND.
+- deleteProject(id, DeleteProject{expectedRevision})→`{id,deleted:true}` (T17): 한 BEGIN IMMEDIATE transaction에서 존재(NOT_FOUND)/CAS(CONFLICT)/같은 프로젝트 active run(draft~downloading, download_failed, submission_unknown → CONFLICT) 검사 후 `UnitOfWork.deleteProject`. submitRun과 같은 transaction 잠금으로 직렬화되어 orphan run이 생기지 않는다. append-only 규칙의 유일한 예외이며 개별 snapshot 수정 권한이 아니다. content-addressed blob은 다른 프로젝트와 공유될 수 있어 지우지 않으므로 디스크 회수·완전 삭제를 약속하지 않는다. 삭제 후 media/export/scene 등 API 조회는 NOT_FOUND.
 
 ## library
 
@@ -76,6 +79,7 @@ HTTP JSON 성공 `{data:T}`, 실패 `{error:{code,message}}`; 성공 200 (생성
 - run은 draft/rev0/providerRequestId=null/actualCost unknown(reason `not-reported`)/errorCode=null. snapshot/compiled deep copy. 생성 endpoint HTTP는 provider submit을 호출하지 않는다. 선택 adapter가 deps.adapters에 없으면 UNSUPPORTED로 거부한다.
 - tickWorker(owner): lease 60초, tick마다 획득/갱신. 다른 owner면 processedRunId=null. 하나의 active run만 처리, 없으면 null. worker loop는 2초 간격, SIGINT/SIGTERM에 다음 tick 중단/lease 해제/DB close.
 - draft: submitting commit 후 upload+submit 최대 30초. 외부 작업 동안 10초마다 lease 갱신; lease 상실하면 새 부수효과 금지. provider 응답 ID를 얻으면 즉시 DB 기록. adapter가 SubmissionError(certainty="rejected")를 던진 경우만 failed. SubmissionError("unknown")와 분류되지 않은 모든 exception은 submissionFailureState에 따라 submission_unknown. timeout/network/응답 파싱 불명확은 항상 unknown. 클라이언트 submit 자동 retry 설정을 명시적으로 0으로 설정하거나 retry 없는 transport 사용.
+- 제출 시도 취소(T13): `ModelAdapter.submit(input, refs, context: SubmitContext)`. 한 시도의 30초 deadline, heartbeat의 lease 상실, 시도 종료(완료 포함)가 같은 `context.signal`을 abort한다. abort 후에는 새 upload나 유료 요청을 시작하지 않는다. `context.mayPost()`는 application이 제공하는 동기 권한 검사로, 같은 transaction에서 owner lease 갱신 성공 + run이 시도 시작 시의 revision으로 아직 `submitting`인지 확인한다(검사 예외=false). adapter는 모든 upload await 뒤 signal을 확인하고, 유료 요청 직전 signal과 `mayPost()`를 확인한다. 마지막 검사와 요청 시작 사이에 await가 없어야 한다. 취소/권한 거부로 보내지 않은 요청은 SubmissionError("rejected")지만, runs는 이미 timeout(unknown)·lease 상실(기록 금지)로 결과를 정했으므로 늦은 결과를 기록하지 않는다. 이미 출발한 요청의 abort는 provider 취소/환급이 아니며 결과는 기존대로 unknown이고 자동 재제출하지 않는다. SDK upload 자체는 중단할 수 없으므로 "upload 완료 후 POST 금지"만 보장한다.
 - expired 이전 worker의 submitting을 인수하면 request ID 없을 경우 submission_unknown; 절대로 다시 submit하지 않는다. 늦게 도착한 응답도 원래 worker의 lease 소유권과 CAS를 확인한다. 보장은 exactly-once가 아니라 **불명확 제출 시 중단**이다.
 - queued/running: poll만. 일시 network/429/5xx는 상태 유지+errorCode=PROVIDER_POLL, 다음 tick에 재조회. provider FAILED만 failed. running에서 provider queued로 돌아오는 응답은 무시. completed면 downloading commit.
 - downloading: adapter.download (최대 30초) → output count=compiled num_images, decoded MIME/size/픽셀 제한, live 결과 크기는 요청과 일치해야 함. mock만 명시적 1×1 fixture 예외. blob 저장 후 전체 Media/Candidate insert + run succeeded atomic. unique(run,index)는 replay 중복 방지. 파일 실패/결과 shape 불일치는 download_failed, 생성 재요청 금지.
@@ -84,7 +88,7 @@ HTTP JSON 성공 `{data:T}`, 실패 `{error:{code,message}}`; 성공 200 (생성
 
 ## fal
 
-- createFalAdapter(id,key,transport?)→ModelAdapter, buildFalInput(compiled,referenceUrls)→FalInput. transport 주입 테스트는 network 없이 실행. default transport(2026-10-26 승인된 구성): **submit은 SDK를 우회해 공식 Queue REST(`POST https://queue.fal.run/<endpoint>`, `Authorization: Key`)를 서버 fetch로 호출당 POST 1회, `redirect:"error"`, 30초 timeout으로 직접 호출**한다(@fal-ai/client 1.10.1의 queue.submit은 요청별 retry 설정이 client retry 설정을 덮어써 재시도 0을 보장할 수 없음). 429·5xx·timeout·연결 단절·응답 파싱 실패·request_id 누락은 SubmissionError("unknown"). upload/status/result는 instance-scoped SDK client(`createFalClient`, retry 0 설정)를 사용하고 전역 fal.config는 공유하지 않는다. 오류 본문과 인증 header는 로그에 남기지 않는다. queue submit 전 upload/입력 실패는 명확하게 미제출이므로 SubmissionError("rejected"); queue 응답의 400/401/403/404/422처럼 명백한 거부만 rejected로 분류한다. 그 외 timeout/5xx/파싱 오류는 unknown. SDK 자체 자동 retry는 금지한다.
+- createFalAdapter(id,key,transport?)→ModelAdapter, buildFalInput(compiled,referenceUrls)→FalInput. transport 주입 테스트는 network 없이 실행. default transport(2026-10-26 승인된 구성): **submit은 SDK를 우회해 공식 Queue REST(`POST https://queue.fal.run/<endpoint>`, `Authorization: Key`)를 서버 fetch로 호출당 POST 1회, `redirect:"error"`, 30초 timeout으로 직접 호출**한다(@fal-ai/client 1.10.1의 queue.submit은 요청별 retry 설정이 client retry 설정을 덮어써 재시도 0을 보장할 수 없음). 429·5xx·timeout·연결 단절·응답 파싱 실패·request_id 누락은 SubmissionError("unknown"). upload/status/result는 instance-scoped SDK client(`createFalClient`, retry 0 설정)를 사용하고 전역 fal.config는 공유하지 않는다. 오류 본문과 인증 header는 로그에 남기지 않는다. queue submit 전 upload/입력 실패는 명확하게 미제출이므로 SubmissionError("rejected"); queue 응답의 400/401/403/404/422처럼 명백한 거부만 rejected로 분류한다. 그 외 timeout/5xx/파싱 오류는 unknown. SDK 자체 자동 retry는 금지한다. T13: `FalTransport.submit(endpoint,input,context)`는 `context.signal` abort 또는 `mayPost()` 거부/예외면 fetch 없이 SubmissionError("rejected")를 던지고, 검사 직후 같은 동기 단계에서 fetch를 시작하며 `AbortSignal.any([context.signal, timeout])`을 HTTP 요청에 전달한다.
 - submit: adapter/endpoint 일치, refs 길이/bytes mapping 검사→각 ref 업로드→반환 URL을 native input에 순서대로 바인딩→queue.submit 딱 1회. public Compiled에는 stable media IDs, 임시 upload URL은 메모리에서만. 실제 native field mapping은 buildFalInput 테스트가 보호한다.
 - edit image_urls 1..4, text image_urls 없음. mask/negative_prompt/LoRA/controlnet 필드 없음. seed null 생략, 안전 검사 true. published endpoint schema 변경은 blocker.
 - poll은 IN_QUEUE/IN_PROGRESS/COMPLETED/FAILED를 queued/running/completed/failed로 정규화. transport.result는 queue.result의 data만 반환한다. download는 queue.result→FalOutput schema validate→이미지 fetch→bytes, MIME png, returned seed 기록. has_nsfw_concepts에 true가 있으면 PROVIDER 오류로 후보 승인을 만들지 않는다.
@@ -108,6 +112,7 @@ HTTP JSON 성공 `{data:T}`, 실패 `{error:{code,message}}`; 성공 200 (생성
 - Manifest v1은 full project workspace snapshot(이번 export record 및 PNG media를 삽입하기 **직전**, 기존 exports는 포함), 모든 workspace media의 stable path/hash와 파일 목록. JSON+PNG 두 다운로드이며 zip/import는 범위 밖. manifest의 나머지 참조 파일은 로컬 data/blobs에 유지되며 **두 파일만으로 다른 컴퓨터에서 프로젝트 복원 가능하다고 표시하지 않는다**. 이동 가능한 전체 bundle은 후속 기능.
 - workspace/manifest는 schema allowlist로 serialize; FAL_KEY, 환경변수, request headers, provider URLs, 절대 path 금지. snapshot에 입력 텍스트는 그대로 포함하므로 사용자가 직접 prompt에 쓴 텍스트를 자동 비밀 탐지한다고 주장하지 않는다.
 - side effects: blob write + DB, 원본은 읽기만. 누락 파일/깨진 이미지→STORAGE, 부분 export DB commit 금지.
+- 참조 무결성(T15): export는 manifest snapshot을 고정한 뒤 blob/DB 쓰기 전에 manifest가 열거할 모든 workspace media와 합성 입력을 읽어 각 record의 byte 수·SHA-256·decode한 MIME/width/height와 비교한다. 같은 path는 한 번만 읽고 decode하되 record마다 비교한다. 누락/손상/불일치는 경로나 원래 오류 없이 STORAGE로 중단하고 새 export/PNG media를 commit하지 않는다. 검증된 bytes를 그대로 합성에 쓴다. 검증 이후 외부 프로그램의 파일 삭제까지 원자적으로 막지는 않는다.
 
 ## experiments
 
@@ -124,6 +129,7 @@ HTTP JSON 성공 `{data:T}`, 실패 `{error:{code,message}}`; 성공 200 (생성
 |---|---|
 | GET/POST projects | listProjects/createProject / T03 |
 | GET projects/:id | getProject / T03 |
+| PATCH/DELETE projects/:id | updateProject/deleteProject / T17 |
 | GET projects/:id/workspace | getWorkspace / T03 |
 | POST media/upload, GET media/:id | uploadMedia/readMedia / T02 |
 | POST styles, POST styles/:id/approve | createStyle/approveStyle / T03 |
@@ -138,6 +144,7 @@ HTTP JSON 성공 `{data:T}`, 실패 `{error:{code,message}}`; 성공 200 (생성
 | POST exports, GET exports/:id/manifest | export / T09 |
 | POST experiments, GET experiments/:id, POST experiments/:id/runs | experiment / T11 |
 | POST demo, GET health | implemented skeleton; T12 health updates readiness |
+| GET/PUT/DELETE settings/fal | fal 키·모드 로컬 설정(FalSettingsInput/FalSettings) / T16 |
 
 ## UI 공통 (T10 통합)
 
@@ -147,8 +154,10 @@ projectId/sceneId/candidateId는 URL query로 선택하고 reload 후 복원한�
 
 configは明示的env引数をparse。APP_DATA_DIR default ./data、GENERATION_PROVIDER mock|fal、FAL_KEYはfalで必須。import時env読取/DB open禁止。containerはlazy singletonを返し、worker用factoryはNext server-only markerをimportしない。workerはprovider modeとDB pathを表示してよいがkey/URLは表示しない。shutdownでleaseとDBを閉じる。
 
+T16 로컬 provider 설정([ADR 005](decisions/005-local-provider-settings.md)): 우선순위는 env(GENERATION_PROVIDER/FAL_KEY) > `APP_DATA_DIR/settings/settings.json`(`{version:1,mode,falKey?}`, 디렉터리 0700·파일 0600, 동기 atomic replace, 평문) > mock. `loadConfig(env, stored?)`는 순수 함수(env만 주면 기존 동작), server container와 worker는 시작 시 `loadEffectiveConfig(env)`로 파일까지 읽는다. 실행 중 서버는 파일을 다시 읽어 provider를 바꾸지 않는다. `GET /api/settings/fal`→`FalSettings{configured,source(env|file|none),savedMode,modeSource(env|file|default),serverMode,restartRequired}`(키 없음). `PUT` `FalSettingsInput{mode,key?}`(key 생략=유지, 빈/공백 포함 값=VALIDATION, fal인데 env·파일 어디에도 키가 없으면 VALIDATION). `DELETE`는 파일 키 삭제+파일 모드 mock(env 키는 건드리지 않음). PUT/DELETE는 same-origin 검사 후 직렬화: 이 프로세스의 생성 게이트를 닫고(공유 adapter map을 비워 이후 submitRun은 UNSUPPORTED) → 동기 transaction에서 active run(draft~submission_unknown/download_failed) 있으면 CONFLICT → 동기 파일 교체, 어떤 실패든 게이트를 다시 열고 기존 파일 유지. 다음 시작 설정이 실행 중 설정과 다르면(`restartRequired`) 재시작 전까지 게이트를 닫아 둔다(mock 포함 신규 생성 거부, models reason `RESTART_REQUIRED`, health `restartRequired:true`). worker는 2초마다 설정 파일을 다시 읽어 실행 설정과 다르거나 읽을 수 없으면 새 tick을 멈추고 lease 해제 후 종료(재시작 요구, hot reload 없음). 저장은 fal을 호출하지 않으며 "저장됨"은 "인증 확인"이 아니다. 키는 DB/workspace/manifest/log/localStorage/cookie/응답에 넣지 않는다.
+
 공통HTTP実装済み: streamed JSON cap, same-origin, safe errors.ライブラリ例外は各infrastructure boundaryでAppErrorへ変換する。DTOをルートから返す前に契約schemaでserialize/validateする。ダウンロード以外のHTTP応答にfs pathを公開しない。
 
 HTTP origin 비교는 Next의 정규화된 URL hostname 대신 직접 Host header를 사용한다. 먼저 localhost/127.0.0.1/[::1]만 허용하고 origin의 scheme/host/port를 비교한다. proxy forwarded header는 신뢰하지 않는다. origin 없는 CLI도 non-local Host는 거부한다.
 
-GET /api/models 반환은 `ModelInfo[]` schema로 고정한다. id/provider/endpoint/available/mode/scope/maxReferences/masks/reason을 모두 반환한다. T07 구현 후 fal adapter는 GENERATION_PROVIDER=fal 및 유효한 FAL_KEY 설정일 때만 available=true, 나머지는 reason=NOT_CONFIGURED. T12가 조립할 mock adapter는 product mode에서도 사용 가능하므로 T07에서 mock scope를 product로 갱신한다. scope는 데이터 생성 지원 범위이며 서버 업무 서비스의 준비 여부는 health.stage와 별개다.
+GET /api/models 반환은 `ModelInfo[]` schema로 고정한다. id/provider/endpoint/available/mode/scope/maxReferences/masks/reason을 모두 반환한다. T07 구현 후 fal adapter는 GENERATION_PROVIDER=fal 및 유효한 FAL_KEY 설정일 때만 available=true, 나머지는 reason=NOT_CONFIGURED. T16 이후 모드/키는 env 또는 설정 파일에서 오며, 재시작 대기 중에는 모든 모델이 available=false, reason=`RESTART_REQUIRED`. T12가 조립할 mock adapter는 product mode에서도 사용 가능하므로 T07에서 mock scope를 product로 갱신한다. scope는 데이터 생성 지원 범위이며 서버 업무 서비스의 준비 여부는 health.stage와 별개다.

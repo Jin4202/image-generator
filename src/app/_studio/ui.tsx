@@ -5,7 +5,7 @@ import { Suspense, useCallback, type ReactNode } from "react";
 import * as C from "@/contracts";
 import { describeError, useApi, type Load } from "./api";
 
-const pages = [["/projects", "프로젝트"], ["/assets", "자산"], ["/styles", "스타일"], ["/scenes", "장면"], ["/generate", "생성"], ["/history", "이력"]] as const;
+const pages = [["/projects", "프로젝트"], ["/assets", "에셋"], ["/styles", "스타일"], ["/scenes", "장면"], ["/generate", "생성"], ["/history", "이력"], ["/settings", "설정"]] as const;
 
 /** Reads a UUID query value (selection survives reload); anything malformed counts as "not selected". */
 export function useSelection(name: string): string | null {

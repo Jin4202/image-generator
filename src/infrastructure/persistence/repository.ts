@@ -40,6 +40,8 @@ const specs: { [K in EntityKind]: Spec } = {
   experiments: { table: table(s.experiments), schema: C.Experiment, scoped: true, mutability: "mutable", fixed: ["sceneIds", "sceneRevisions"] },
 };
 const requiredTables = [...Object.keys(specs), "worker_lease", "schema_migrations"];
+/** T17 deletion order: every table's FK targets come later (effects→candidates→runs→previews; all → projects). */
+const deletionOrder: readonly EntityKind[] = ["effects", "reviews", "exports", "experiments", "candidates", "runs", "previews", "scenes", "styles", "assets", "media", "projects"];
 
 const fail = (code: "VALIDATION" | "NOT_FOUND" | "CONFLICT" | "STORAGE", message: string): never => { throw new AppError(code, message); };
 
@@ -187,6 +189,13 @@ function createRepository(sqlite: Database.Database): Repository {
     releaseLease(leaseOwner: string) {
       atomic(() => { db.delete(s.workerLease).where(and(eq(s.workerLease.id, 1), eq(s.workerLease.owner, owner(leaseOwner)))).run(); });
     },
+    deleteProject(projectId: string) {
+      atomic(() => {
+        if (!C.Id.safeParse(projectId).success) fail("VALIDATION", "Invalid project ID");
+        if (!find("projects", projectId)) fail("NOT_FOUND", "Project not found");
+        for (const kind of deletionOrder) { const t = specOf(kind).table; db.delete(t).where(eq(kind === "projects" ? t.id : t.projectId, projectId)).run(); }
+      });
+    },
   };
 
   return {
@@ -196,7 +205,7 @@ function createRepository(sqlite: Database.Database): Repository {
       run(() => { if (sqlite.inTransaction) fail("VALIDATION", "Nested transactions are not supported"); sqlite.exec("BEGIN IMMEDIATE"); });
       let open = true;
       const guard = <A extends unknown[], R>(op: (...args: A) => R) => (...args: A): R => open ? op(...args) : fail("VALIDATION", "Transaction has already finished");
-      const tx: UnitOfWork = { get: guard(unit.get), list: guard(unit.list), insert: guard(unit.insert), replace: guard(unit.replace), acquireLease: guard(unit.acquireLease), releaseLease: guard(unit.releaseLease) } as UnitOfWork;
+      const tx: UnitOfWork = { get: guard(unit.get), list: guard(unit.list), insert: guard(unit.insert), replace: guard(unit.replace), acquireLease: guard(unit.acquireLease), releaseLease: guard(unit.releaseLease), deleteProject: guard(unit.deleteProject) } as UnitOfWork;
       let result: T;
       try { result = work(tx); } catch (error) { open = false; rollback(); throw error; }
       open = false;

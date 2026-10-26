@@ -28,6 +28,8 @@ export const postJson = <T>(path: string, body: unknown, schema?: z.ZodType<T>, 
 export function describeError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.notImplemented) return "미구현 (501 NOT_IMPLEMENTED): 이 기능의 서버 연결이 아직 완료되지 않았습니다. 결과가 저장되거나 생성되지 않았습니다.";
+    // T17: a deleted project (or anything under it) is reported as gone, never shown as empty or successful.
+    if (error.status === 404) return `${error.code}: ${error.message} — 삭제되었거나 존재하지 않습니다. 프로젝트 목록에서 다시 선택하세요.`;
     return `${error.code}: ${error.message}`;
   }
   return error instanceof Error ? error.message : "알 수 없는 오류";

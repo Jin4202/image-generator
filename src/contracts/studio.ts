@@ -2,6 +2,11 @@ import { z } from "zod";
 import { Box, Id, RecordMeta, Size, Timestamp } from "./common";
 export const CreateProject = z.object({ title: z.string().trim().min(1).max(120), budgetMicros: z.number().int().nonnegative().safe().nullable().default(null) }).strict();
 export const Project = z.object({ ...RecordMeta, ...CreateProject.shape });
+/** T17: PATCH /api/projects/:id. Same field rules as CreateProject; both fields required; CAS on revision. */
+export const UpdateProject = z.object({ expectedRevision: z.number().int().nonnegative(), title: CreateProject.shape.title, budgetMicros: z.number().int().nonnegative().safe().nullable() }).strict();
+/** T17: DELETE /api/projects/:id body and result. */
+export const DeleteProject = z.object({ expectedRevision: z.number().int().nonnegative() }).strict();
+export const ProjectDeleted = z.object({ id: Id, deleted: z.literal(true) }).strict();
 export const Media = z.object({ ...RecordMeta, sha256: z.string().regex(/^[a-f0-9]{64}$/), mime: z.enum(["image/png", "image/jpeg", "image/webp"]), width: z.number().int().positive(), height: z.number().int().positive(), bytes: z.number().int().positive(), relativePath: z.string().min(1), source: z.enum(["upload", "generated", "export"]), licenseNotes: z.string().max(2000) });
 export const Reference = z.object({ mediaId: Id, role: z.enum(["parent", "character", "style", "sketch", "mask"]), note: z.string().max(500).default("") }).strict();
 export const StyleSpec = z.object({ linework: z.string().max(1000), shading: z.string().max(1000), palette: z.string().max(1000), anatomy: z.string().max(1000), rendering: z.string().max(1000), lighting: z.string().max(1000), effectsLanguage: z.string().max(1000), positive: z.string().max(3000), negative: z.string().max(1000) }).strict();
